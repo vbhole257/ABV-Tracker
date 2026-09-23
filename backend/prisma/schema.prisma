@@ -1,6 +1,6 @@
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 generator client {
@@ -19,13 +19,13 @@ model User {
 
 model Product {
   id                    String              @id @default(uuid())
-  name                  String              // e.g. Jeera Masala 160ml
-  flavor                String              // Jeera, Cola, Orange, Lemon
-  bottleSizeMl          Int                 // 160, 200, 500, 1500, 2000
-  bottlesPerCase        Int                 // e.g. 30
+  name                  String              // e.g. Jeeru Masala 160ml
+  flavor                String              // Jeeru, Orange
+  bottleSizeMl          Int                 // 160
+  bottlesPerCase        Int                 // 30
   mrpPerBottle          Float
   defaultPricePerCase   Float
-  skuCode               String              @unique // e.g. JEERA-160-30
+  skuCode               String              @unique // JEERU-160-30, ORANGE-160-30
   isActive              Boolean             @default(true)
   createdAt             DateTime            @default(now())
   recipes               Recipe[]
@@ -105,7 +105,7 @@ model RecipeIngredient {
 
 model ProductionBatch {
   id                  String               @id @default(uuid())
-  batchNumber         String               @unique // e.g. J26092301
+  batchNumber         String               @unique
   productId           String
   product             Product              @relation(fields: [productId], references: [id])
   recipeId            String
@@ -114,7 +114,7 @@ model ProductionBatch {
   actualCasesProduced Int
   mfgDate             DateTime
   expDate             DateTime
-  status              String               @default("COMPLETED") // IN_PROGRESS, COMPLETED, CANCELLED
+  status              String               @default("COMPLETED")
   createdAt           DateTime             @default(now())
   rejections          ProductionLoss[]
   finishedGoods       FinishedGoodsStock[]
@@ -125,7 +125,7 @@ model ProductionLoss {
   batchId     String
   batch       ProductionBatch @relation(fields: [batchId], references: [id])
   lossType    String          // BOTTLE_BURST, CAP_DEFECT, SPILLAGE, LABEL_DEFECT, OTHER
-  quantity    Int             // Cases or bottles lost
+  quantity    Int
   notes       String?
   createdAt   DateTime        @default(now())
 }
@@ -161,7 +161,7 @@ model Wholesaler {
   creditLimit        Float               @default(50000.0)
   currentOutstanding Float               @default(0.0)
   cratesHeld         Int                 @default(0)
-  pricingTier        String              @default("STANDARD")
+  pricingTier        String              @default("NUMERIC_RATE")
   createdAt          DateTime            @default(now())
   salesOrders        SalesOrder[]
   payments           WholesalerPayment[]
@@ -176,7 +176,7 @@ model SalesOrder {
   wholesaler     Wholesaler         @relation(fields: [wholesalerId], references: [id])
   totalAmount    Float
   paidAmount     Float              @default(0.0)
-  paymentStatus  String             @default("UNPAID") // PAID, PARTIAL, UNPAID
+  paymentStatus  String             @default("UNPAID")
   cratesIssued   Int                @default(0)
   dispatchDate   DateTime           @default(now())
   items          SalesOrderItem[]
@@ -198,9 +198,9 @@ model SalesOrderItem {
 model WholesalerLedger {
   id              String     @id @default(uuid())
   wholesalerId    String
-  wholesaler      Wholesaler @relation(fields: [wholesalerId], references: [id])
+  wholesaler     Wholesaler @relation(fields: [wholesalerId], references: [id])
   transactionType String     // INVOICE, PAYMENT, CREDIT_NOTE, CHEQUE_BOUNCE, BOUNCE_CHARGE, ADJUSTMENT
-  amount          Float      // Positive = Charge, Negative = Payment/Credit
+  amount          Float
   balanceAfter    Float
   referenceId     String?
   notes           String?
@@ -215,9 +215,9 @@ model WholesalerPayment {
   salesOrder     SalesOrder? @relation(fields: [salesOrderId], references: [id])
   amountPaid     Float
   paymentMode    String      // CASH, UPI, NEFT_RTGS, CHEQUE, PDC, CREDIT_NOTE
-  referenceNo    String?     // UPI Ref, Cheque No, UTR
+  referenceNo    String?
   chequeDate     DateTime?
-  chequeStatus   String      @default("NOT_APPLICABLE") // NOT_APPLICABLE, PENDING, CLEARED, BOUNCED
+  chequeStatus   String      @default("NOT_APPLICABLE")
   bankAccountId  String?
   receivedDate   DateTime    @default(now())
   createdAt      DateTime    @default(now())
@@ -226,7 +226,7 @@ model WholesalerPayment {
 model CrateTransaction {
   id              String     @id @default(uuid())
   wholesalerId    String
-  wholesaler      Wholesaler @relation(fields: [wholesalerId], references: [id])
+  wholesaler     Wholesaler @relation(fields: [wholesalerId], references: [id])
   transactionType String     // ISSUED, RETURNED, DAMAGED, LOST, ADJUSTMENT
   cratesQuantity  Int
   balanceAfter    Int
@@ -242,7 +242,7 @@ model SalesTarget {
   targetRevenueAmount   Float
   achievedCasesCount    Int      @default(0)
   achievedRevenueAmount Float    @default(0.0)
-  status                String   @default("IN_PROGRESS") // IN_PROGRESS, MET, MISSED
+  status                String   @default("IN_PROGRESS")
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 }
@@ -281,7 +281,7 @@ model SalaryAdvance {
   amount      Float
   advanceDate DateTime @default(now())
   notes       String?
-  status      String   @default("OPEN") // OPEN, SETTLED
+  status      String   @default("OPEN")
   createdAt   DateTime @default(now())
 }
 
@@ -295,7 +295,7 @@ model PayrollRecord {
   advanceDeducted Float    @default(0.0)
   netPaid         Float
   paymentDate     DateTime @default(now())
-  paymentMode     String   // CASH, BANK
+  paymentMode     String
   createdAt       DateTime @default(now())
 }
 
@@ -315,7 +315,7 @@ model AccountTransaction {
   account         Account  @relation(fields: [accountId], references: [id])
   transactionType String   // INFLOW, OUTFLOW
   amount          Float
-  category        String   // SALES_COLLECTION, SUPPLIER_PAYMENT, EXPENSE, SALARY, EMI, ADVANCE, OWNER_FUND
+  category        String
   referenceId     String?
   notes           String?
   createdAt       DateTime @default(now())
@@ -323,7 +323,7 @@ model AccountTransaction {
 
 model Lender {
   id                       String        @id @default(uuid())
-  lenderName               String        // HDFC Bank, Private Financier
+  lenderName               String
   lenderType               String        // BANK, NBFC, PRIVATE
   accountNumber            String
   principalGranted         Float
@@ -345,7 +345,7 @@ model EMISchedule {
   emiAmount          Float
   principalComponent Float
   interestComponent  Float
-  status             String   @default("UPCOMING") // UPCOMING, PAID, OVERDUE
+  status             String   @default("UPCOMING")
   paidDate           DateTime?
   referenceNo        String?
   createdAt          DateTime @default(now())
@@ -355,7 +355,7 @@ model AuditLog {
   id           String   @id @default(uuid())
   userId       String?
   userName     String?
-  action       String   // STOCK_ADJUSTMENT, INVOICE_EDIT, CHEQUE_BOUNCE, EMI_PAYMENT, PAYROLL_RUN
+  action       String
   recordType   String
   recordId     String?
   details      String?

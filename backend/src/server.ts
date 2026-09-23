@@ -9,7 +9,7 @@ const server = Fastify({ logger: true });
 
 async function initServer() {
   await server.register(cors, { origin: true });
-  await server.register(jwt, { secret: 'abvfoods-secret-key-2026' });
+  await server.register(jwt, { secret: process.env.JWT_SECRET || 'abvfoods-secret-key-2026' });
 
   server.get('/api/v1/health', async () => {
     return { status: 'OK', system: 'AbvFoods Tracker API v1.1.0', time: new Date() };
@@ -565,10 +565,11 @@ async function initServer() {
     return { success: true, message: 'Employee deleted successfully' };
   });
 
-  // Start listening
+  // Start listening (DYNAMIC PORT FOR RENDER.COM DEPLOYMENT)
   try {
-    await server.listen({ port: 5000, host: '0.0.0.0' });
-    console.log('🚀 AbvFoods Tracker Fastify Server running on http://localhost:5000');
+    const port = Number(process.env.PORT) || 5000;
+    await server.listen({ port, host: '0.0.0.0' });
+    console.log(`🚀 AbvFoods Tracker Fastify Server running on port ${port}`);
   } catch (err) {
     server.log.error(err);
     process.exit(1);
