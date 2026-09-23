@@ -1,0 +1,363 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  passwordHash  String
+  role          String   // OWNER, FACTORY_MANAGER, DISPATCH_SALES, ACCOUNTANT
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Product {
+  id                    String              @id @default(uuid())
+  name                  String              // e.g. Jeera Masala 160ml
+  flavor                String              // Jeera, Cola, Orange, Lemon
+  bottleSizeMl          Int                 // 160, 200, 500, 1500, 2000
+  bottlesPerCase        Int                 // e.g. 30
+  mrpPerBottle          Float
+  defaultPricePerCase   Float
+  skuCode               String              @unique // e.g. JEERA-160-30
+  isActive              Boolean             @default(true)
+  createdAt             DateTime            @default(now())
+  recipes               Recipe[]
+  productionBatches     ProductionBatch[]
+  finishedGoods         FinishedGoodsStock[]
+  salesOrderItems       SalesOrderItem[]
+}
+
+model Supplier {
+  id                 String     @id @default(uuid())
+  name               String
+  contactPerson      String
+  phone              String
+  address            String?
+  gstNumber          String?
+  currentOutstanding Float      @default(0.0)
+  createdAt          DateTime   @default(now())
+  purchases          Purchase[]
+}
+
+model RawMaterial {
+  id                 String              @id @default(uuid())
+  name               String              // Sugar, Flavor Concentrate, CO2, PET Preforms, Caps, Labels, Shrink Film
+  currentQuantity    Float               @default(0.0)
+  unit               String              // KG, LITER, PCS, ROLL, BOX
+  reorderLevel       Float               @default(100.0)
+  lastPurchaseRate   Float               @default(0.0)
+  createdAt          DateTime            @default(now())
+  recipeIngredients  RecipeIngredient[]
+  purchaseItems      PurchaseItem[]
+}
+
+model Purchase {
+  id                 String         @id @default(uuid())
+  invoiceNumber      String         @unique
+  supplierId         String
+  supplier           Supplier       @relation(fields: [supplierId], references: [id])
+  totalAmount        Float
+  paidAmount         Float          @default(0.0)
+  paymentMode        String         // CASH, BANK, UPI, CHEQUE
+  purchaseDate       DateTime       @default(now())
+  items              PurchaseItem[]
+  createdAt          DateTime       @default(now())
+}
+
+model PurchaseItem {
+  id            String      @id @default(uuid())
+  purchaseId    String
+  purchase      Purchase    @relation(fields: [purchaseId], references: [id])
+  materialId    String
+  material      RawMaterial @relation(fields: [materialId], references: [id])
+  quantity      Float
+  rate          Float
+  subtotal      Float
+}
+
+model Recipe {
+  id                   String             @id @default(uuid())
+  productId            String
+  product              Product            @relation(fields: [productId], references: [id])
+  standardBatchLiters  Float              @default(1000.0)
+  description          String?
+  ingredients          RecipeIngredient[]
+  productionBatches    ProductionBatch[]
+  createdAt            DateTime           @default(now())
+}
+
+model RecipeIngredient {
+  id               String      @id @default(uuid())
+  recipeId         String
+  recipe           Recipe      @relation(fields: [recipeId], references: [id])
+  materialId       String
+  material         RawMaterial @relation(fields: [materialId], references: [id])
+  requiredQuantity Float
+  unit             String
+}
+
+model ProductionBatch {
+  id                  String               @id @default(uuid())
+  batchNumber         String               @unique // e.g. J26092301
+  productId           String
+  product             Product              @relation(fields: [productId], references: [id])
+  recipeId            String
+  recipe              Recipe               @relation(fields: [recipeId], references: [id])
+  batchSizeLiters     Float
+  actualCasesProduced Int
+  mfgDate             DateTime
+  expDate             DateTime
+  status              String               @default("COMPLETED") // IN_PROGRESS, COMPLETED, CANCELLED
+  createdAt           DateTime             @default(now())
+  rejections          ProductionLoss[]
+  finishedGoods       FinishedGoodsStock[]
+}
+
+model ProductionLoss {
+  id          String          @id @default(uuid())
+  batchId     String
+  batch       ProductionBatch @relation(fields: [batchId], references: [id])
+  lossType    String          // BOTTLE_BURST, CAP_DEFECT, SPILLAGE, LABEL_DEFECT, OTHER
+  quantity    Int             // Cases or bottles lost
+  notes       String?
+  createdAt   DateTime        @default(now())
+}
+
+model FinishedGoodsStock {
+  id             String          @id @default(uuid())
+  productId      String
+  product        Product         @relation(fields: [productId], references: [id])
+  batchId        String
+  batch          ProductionBatch @relation(fields: [batchId], references: [id])
+  casesAvailable Int             @default(0)
+  createdAt      DateTime        @default(now())
+}
+
+model InventoryTransaction {
+  id              String   @id @default(uuid())
+  itemType        String   // RAW_MATERIAL, FINISHED_GOODS
+  itemId          String
+  transactionType String   // PURCHASE, PRODUCTION_CONSUMPTION, PRODUCTION_OUTPUT, SALE, SALE_RETURN, DAMAGE, ADJUSTMENT
+  quantityChange  Float
+  balanceAfter    Float
+  referenceId     String?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model Wholesaler {
+  id                 String              @id @default(uuid())
+  businessName       String
+  contactPerson      String
+  mobile             String
+  address            String?
+  creditLimit        Float               @default(50000.0)
+  currentOutstanding Float               @default(0.0)
+  cratesHeld         Int                 @default(0)
+  pricingTier        String              @default("STANDARD")
+  createdAt          DateTime            @default(now())
+  salesOrders        SalesOrder[]
+  payments           WholesalerPayment[]
+  ledgers            WholesalerLedger[]
+  crateTransactions  CrateTransaction[]
+}
+
+model SalesOrder {
+  id             String             @id @default(uuid())
+  invoiceNumber  String             @unique
+  wholesalerId   String
+  wholesaler     Wholesaler         @relation(fields: [wholesalerId], references: [id])
+  totalAmount    Float
+  paidAmount     Float              @default(0.0)
+  paymentStatus  String             @default("UNPAID") // PAID, PARTIAL, UNPAID
+  cratesIssued   Int                @default(0)
+  dispatchDate   DateTime           @default(now())
+  items          SalesOrderItem[]
+  payments       WholesalerPayment[]
+  createdAt      DateTime           @default(now())
+}
+
+model SalesOrderItem {
+  id             String     @id @default(uuid())
+  orderId        String
+  order          SalesOrder @relation(fields: [orderId], references: [id])
+  productId      String
+  product        Product    @relation(fields: [productId], references: [id])
+  casesQuantity  Int
+  pricePerCase   Float
+  subtotal       Float
+}
+
+model WholesalerLedger {
+  id              String     @id @default(uuid())
+  wholesalerId    String
+  wholesaler      Wholesaler @relation(fields: [wholesalerId], references: [id])
+  transactionType String     // INVOICE, PAYMENT, CREDIT_NOTE, CHEQUE_BOUNCE, BOUNCE_CHARGE, ADJUSTMENT
+  amount          Float      // Positive = Charge, Negative = Payment/Credit
+  balanceAfter    Float
+  referenceId     String?
+  notes           String?
+  createdAt       DateTime   @default(now())
+}
+
+model WholesalerPayment {
+  id             String      @id @default(uuid())
+  wholesalerId   String
+  wholesaler     Wholesaler  @relation(fields: [wholesalerId], references: [id])
+  salesOrderId   String?
+  salesOrder     SalesOrder? @relation(fields: [salesOrderId], references: [id])
+  amountPaid     Float
+  paymentMode    String      // CASH, UPI, NEFT_RTGS, CHEQUE, PDC, CREDIT_NOTE
+  referenceNo    String?     // UPI Ref, Cheque No, UTR
+  chequeDate     DateTime?
+  chequeStatus   String      @default("NOT_APPLICABLE") // NOT_APPLICABLE, PENDING, CLEARED, BOUNCED
+  bankAccountId  String?
+  receivedDate   DateTime    @default(now())
+  createdAt      DateTime    @default(now())
+}
+
+model CrateTransaction {
+  id              String     @id @default(uuid())
+  wholesalerId    String
+  wholesaler      Wholesaler @relation(fields: [wholesalerId], references: [id])
+  transactionType String     // ISSUED, RETURNED, DAMAGED, LOST, ADJUSTMENT
+  cratesQuantity  Int
+  balanceAfter    Int
+  notes           String?
+  createdAt       DateTime   @default(now())
+}
+
+model SalesTarget {
+  id                    String   @id @default(uuid())
+  targetType            String   // MONTHLY, QUARTERLY, YEARLY
+  periodIdentifier      String   // e.g. 2026-09, 2026-Q3, 2026-FY
+  targetCasesCount      Int
+  targetRevenueAmount   Float
+  achievedCasesCount    Int      @default(0)
+  achievedRevenueAmount Float    @default(0.0)
+  status                String   @default("IN_PROGRESS") // IN_PROGRESS, MET, MISSED
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model FactoryExpense {
+  id             String   @id @default(uuid())
+  category       String   // ELECTRICITY, DIESEL, FREIGHT, MAINTENANCE, SUPPLIES, LOAN_INTEREST, OTHER
+  amount         Float
+  paymentMode    String   // CASH, BANK
+  bankAccountId  String?
+  referenceNo    String?
+  notes          String?
+  expenseDate    DateTime @default(now())
+  createdAt      DateTime @default(now())
+}
+
+model Employee {
+  id             String          @id @default(uuid())
+  name           String
+  phone          String
+  designation    String
+  wageType       String          // MONTHLY_FIXED, DAILY_WAGE
+  baseRate       Float
+  advanceBalance Float           @default(0.0)
+  joiningDate    DateTime        @default(now())
+  isActive       Boolean         @default(true)
+  advances       SalaryAdvance[]
+  payrolls       PayrollRecord[]
+  createdAt      DateTime        @default(now())
+}
+
+model SalaryAdvance {
+  id          String   @id @default(uuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  amount      Float
+  advanceDate DateTime @default(now())
+  notes       String?
+  status      String   @default("OPEN") // OPEN, SETTLED
+  createdAt   DateTime @default(now())
+}
+
+model PayrollRecord {
+  id              String   @id @default(uuid())
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id])
+  periodMonth     Int
+  periodYear      Int
+  grossSalary     Float
+  advanceDeducted Float    @default(0.0)
+  netPaid         Float
+  paymentDate     DateTime @default(now())
+  paymentMode     String   // CASH, BANK
+  createdAt       DateTime @default(now())
+}
+
+model Account {
+  id           String               @id @default(uuid())
+  accountName  String               // Factory Cash, Current Bank Account, UPI Account
+  accountType  String               // CASH, BANK, UPI
+  accountNo    String?
+  balance      Float                @default(0.0)
+  createdAt    DateTime             @default(now())
+  transactions AccountTransaction[]
+}
+
+model AccountTransaction {
+  id              String   @id @default(uuid())
+  accountId       String
+  account         Account  @relation(fields: [accountId], references: [id])
+  transactionType String   // INFLOW, OUTFLOW
+  amount          Float
+  category        String   // SALES_COLLECTION, SUPPLIER_PAYMENT, EXPENSE, SALARY, EMI, ADVANCE, OWNER_FUND
+  referenceId     String?
+  notes           String?
+  createdAt       DateTime @default(now())
+}
+
+model Lender {
+  id                       String        @id @default(uuid())
+  lenderName               String        // HDFC Bank, Private Financier
+  lenderType               String        // BANK, NBFC, PRIVATE
+  accountNumber            String
+  principalGranted         Float
+  outstandingPrincipal     Float
+  annualInterestRate       Float
+  monthlyEmiAmount         Float
+  tenureMonths             Int
+  startDate                DateTime
+  createdAt                DateTime      @default(now())
+  emiSchedules             EMISchedule[]
+}
+
+model EMISchedule {
+  id                 String   @id @default(uuid())
+  lenderId           String
+  lender             Lender   @relation(fields: [lenderId], references: [id])
+  installmentNo      Int
+  dueDate            DateTime
+  emiAmount          Float
+  principalComponent Float
+  interestComponent  Float
+  status             String   @default("UPCOMING") // UPCOMING, PAID, OVERDUE
+  paidDate           DateTime?
+  referenceNo        String?
+  createdAt          DateTime @default(now())
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String?
+  userName     String?
+  action       String   // STOCK_ADJUSTMENT, INVOICE_EDIT, CHEQUE_BOUNCE, EMI_PAYMENT, PAYROLL_RUN
+  recordType   String
+  recordId     String?
+  details      String?
+  createdAt    DateTime @default(now())
+}
