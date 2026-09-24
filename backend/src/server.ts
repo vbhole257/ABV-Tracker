@@ -273,13 +273,27 @@ async function initServer() {
     return { success: true, message: 'Supplier deleted successfully' };
   });
 
-  // RAW MATERIAL PURCHASE RECORD API
+  // RAW MATERIAL PURCHASE RECORD & LEDGER CRUD APIs
+  server.get('/api/v1/purchases', async () => {
+    const purchases = await prisma.purchase.findMany({
+      include: {
+        supplier: true,
+        items: {
+          include: { material: true },
+        },
+      },
+      orderBy: { purchaseDate: 'desc' },
+    });
+    return { success: true, data: purchases };
+  });
+
   server.post('/api/v1/purchases', async (request, reply) => {
     const schema = z.object({
       supplierId: z.string(),
       invoiceNumber: z.string(),
       paymentMode: z.string().default('CASH'),
       paidAmount: z.number().default(0.0),
+      purchaseDate: z.string().optional(),
       items: z.array(
         z.object({
           materialId: z.string(),
@@ -302,6 +316,7 @@ async function initServer() {
             totalAmount,
             paidAmount: body.paidAmount,
             paymentMode: body.paymentMode,
+            purchaseDate: body.purchaseDate ? new Date(body.purchaseDate) : new Date(),
             items: {
               create: body.items.map((i) => ({
                 materialId: i.materialId,
@@ -347,6 +362,54 @@ async function initServer() {
     } catch (err: any) {
       return reply.status(400).send({ success: false, error: err.message });
     }
+  });
+
+  server.put('/api/v1/purchases/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      invoiceNumber: z.string().optional(),
+      paymentMode: z.string().optional(),
+      paidAmount: z.number().optional(),
+    });
+    const body = schema.parse(request.body);
+    const updated = await prisma.purchase.update({
+      where: { id },
+      data: body,
+    });
+    return { success: true, data: updated };
+  });
+
+  server.delete('/api/v1/purchases/:id', async (request) => {
+    const { id } = request.params as { id: string };
+
+    await prisma.$transaction(async (tx) => {
+      const purchase = await tx.purchase.findUnique({
+        where: { id },
+        include: { items: true },
+      });
+
+      if (purchase) {
+        for (const item of purchase.items) {
+          await tx.rawMaterial.update({
+            where: { id: item.materialId },
+            data: { currentQuantity: { decrement: item.quantity } },
+          });
+        }
+
+        const unpaidBalance = purchase.totalAmount - purchase.paidAmount;
+        if (unpaidBalance > 0) {
+          await tx.supplier.update({
+            where: { id: purchase.supplierId },
+            data: { currentOutstanding: { decrement: unpaidBalance } },
+          });
+        }
+
+        await tx.purchaseItem.deleteMany({ where: { purchaseId: id } });
+        await tx.purchase.delete({ where: { id } });
+      }
+    });
+
+    return { success: true, message: 'Purchase entry deleted & stock reversed.' };
   });
 
   // RAW MATERIALS CRUD
@@ -529,6 +592,114 @@ async function initServer() {
       await tx.wholesaler.delete({ where: { id } });
     });
     return { success: true, message: 'Wholesaler deleted successfully' };
+  });
+
+  // 6B. SALES ORDERS / DISPATCH INVOICE CRUD APIs
+  server.get('/api/v1/sales/orders', async () => {
+    const orders = await prisma.salesOrder.findMany({
+      include: {
+        wholesaler: true,
+        items: { include: { product: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { success: true, data: orders };
+  });
+
+  server.post('/api/v1/sales/orders', async (request, reply) => {
+    const schema = z.object({
+      wholesalerId: z.string(),
+      invoiceNumber: z.string(),
+      cratesIssued: z.number().default(0),
+      paidAmount: z.number().default(0.0),
+      paymentMode: z.string().default('CASH'),
+      referenceNo: z.string().optional(),
+      items: z.array(
+        z.object({
+          productId: z.string(),
+          casesQuantity: z.number().positive(),
+          pricePerCase: z.number().positive(),
+        })
+      ),
+    });
+
+    const body = schema.parse(request.body);
+    const totalAmount = body.items.reduce((sum, item) => sum + item.casesQuantity * item.pricePerCase, 0);
+    const unpaidBalance = totalAmount - body.paidAmount;
+
+    try {
+      const order = await prisma.$transaction(async (tx) => {
+        const createdOrder = await tx.salesOrder.create({
+          data: {
+            invoiceNumber: body.invoiceNumber,
+            wholesalerId: body.wholesalerId,
+            totalAmount,
+            paidAmount: body.paidAmount,
+            paymentStatus: unpaidBalance <= 0 ? 'PAID' : body.paidAmount > 0 ? 'PARTIAL' : 'UNPAID',
+            cratesIssued: body.cratesIssued,
+            items: {
+              create: body.items.map((i) => ({
+                productId: i.productId,
+                casesQuantity: i.casesQuantity,
+                pricePerCase: i.pricePerCase,
+                subtotal: i.casesQuantity * i.pricePerCase,
+              })),
+            },
+          },
+        });
+
+        if (unpaidBalance > 0) {
+          await tx.wholesaler.update({
+            where: { id: body.wholesalerId },
+            data: {
+              currentOutstanding: { increment: unpaidBalance },
+              cratesHeld: { increment: body.cratesIssued },
+            },
+          });
+        }
+
+        if (body.paidAmount > 0) {
+          const account = await tx.account.findFirst();
+          if (account) {
+            await tx.account.update({
+              where: { id: account.id },
+              data: { balance: { increment: body.paidAmount } },
+            });
+          }
+        }
+
+        return createdOrder;
+      });
+
+      return { success: true, data: order, message: 'Sales Order & Invoice created successfully.' };
+    } catch (err: any) {
+      return reply.status(400).send({ success: false, error: err.message });
+    }
+  });
+
+  server.delete('/api/v1/sales/orders/:id', async (request) => {
+    const { id } = request.params as { id: string };
+
+    await prisma.$transaction(async (tx) => {
+      const order = await tx.salesOrder.findUnique({ where: { id } });
+      if (order) {
+        const unpaidBalance = order.totalAmount - order.paidAmount;
+        if (unpaidBalance > 0) {
+          await tx.wholesaler.update({
+            where: { id: order.wholesalerId },
+            data: {
+              currentOutstanding: { decrement: unpaidBalance },
+              cratesHeld: { decrement: order.cratesIssued },
+            },
+          });
+        }
+
+        await tx.salesOrderItem.deleteMany({ where: { orderId: id } });
+        await tx.salesOrder.delete({ where: { id } });
+      }
+    });
+
+    return { success: true, message: 'Sales Order invoice deleted successfully.' };
   });
 
   // 7. LENDERS & LOANS FULL CRUD APIs
@@ -850,6 +1021,42 @@ async function initServer() {
     });
 
     return { success: true, message: 'Payroll record deleted successfully.' };
+  });
+
+  // 8D. STAFF ATTENDANCE CRUD APIs
+  server.get('/api/v1/employees/attendance', async () => {
+    const attendances = await prisma.attendance.findMany({
+      include: { employee: true },
+      orderBy: { attDate: 'desc' },
+    });
+    return { success: true, data: attendances };
+  });
+
+  server.post('/api/v1/employees/attendance', async (request) => {
+    const schema = z.object({
+      employeeId: z.string(),
+      attDate: z.string().optional(),
+      status: z.string(), // PRESENT, ABSENT, HALF_DAY, OVERTIME
+      overtimeHours: z.number().default(0.0),
+      notes: z.string().optional(),
+    });
+    const body = schema.parse(request.body);
+    const attendance = await prisma.attendance.create({
+      data: {
+        employeeId: body.employeeId,
+        attDate: body.attDate ? new Date(body.attDate) : new Date(),
+        status: body.status,
+        overtimeHours: body.overtimeHours,
+        notes: body.notes,
+      },
+    });
+    return { success: true, data: attendance, message: 'Attendance recorded successfully.' };
+  });
+
+  server.delete('/api/v1/employees/attendance/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    await prisma.attendance.delete({ where: { id } });
+    return { success: true, message: 'Attendance record deleted.' };
   });
 
   // Start listening (DYNAMIC PORT FOR RENDER.COM DEPLOYMENT)

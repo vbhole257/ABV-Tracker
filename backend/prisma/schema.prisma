@@ -272,7 +272,19 @@ model Employee {
   isActive       Boolean         @default(true)
   advances       SalaryAdvance[]
   payrolls       PayrollRecord[]
+  attendances    Attendance[]
   createdAt      DateTime        @default(now())
+}
+
+model Attendance {
+  id            String   @id @default(uuid())
+  employeeId    String
+  employee      Employee @relation(fields: [employeeId], references: [id])
+  attDate       DateTime @default(now())
+  status        String   // PRESENT, ABSENT, HALF_DAY, OVERTIME
+  overtimeHours Float    @default(0.0)
+  notes         String?
+  createdAt     DateTime @default(now())
 }
 
 model SalaryAdvance {

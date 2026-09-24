@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Check, Trash2, Edit, UserPlus, DollarSign, CreditCard, Calendar, Inbox, ArrowUpRight, TrendingDown } from 'lucide-react';
+import { Users, Check, Trash2, Edit, UserPlus, DollarSign, CreditCard, Calendar, Inbox, Clock, CheckSquare } from 'lucide-react';
 
 interface PayrollExpensesPageProps {
   onRefresh: () => void;
 }
 
 export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefresh }) => {
-  const [activeTab, setActiveTab] = useState<'STAFF' | 'ADVANCES' | 'PAYROLL' | 'EXPENSES'>('STAFF');
+  const [activeTab, setActiveTab] = useState<'STAFF' | 'ATTENDANCE' | 'ADVANCES' | 'PAYROLL' | 'EXPENSES'>('STAFF');
   const [toast, setToast] = useState('');
 
   // Data States
   const [employees, setEmployees] = useState<any[]>([]);
   const [advances, setAdvances] = useState<any[]>([]);
   const [payrolls, setPayrolls] = useState<any[]>([]);
+  const [attendances, setAttendances] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
 
   // Staff Form State (Add / Edit)
@@ -23,6 +24,14 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
   const [empDesig, setEmpDesig] = useState('');
   const [empWageType, setEmpWageType] = useState('MONTHLY_FIXED');
   const [empBaseRate, setEmpBaseRate] = useState(18000);
+
+  // Attendance Modal State
+  const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [attEmpId, setAttEmpId] = useState('');
+  const [attDate, setAttDate] = useState(new Date().toISOString().slice(0, 10));
+  const [attStatus, setAttStatus] = useState('PRESENT');
+  const [attOtHours, setAttOtHours] = useState(0);
+  const [attNotes, setAttNotes] = useState('');
 
   // Salary Advance Deposit Modal State
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
@@ -41,25 +50,27 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
   const [payMode, setPayMode] = useState('CASH');
   const [payAccountId, setPayAccountId] = useState('');
 
-  // Factory Expense State
-  const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [expCategory, setExpCategory] = useState('ELECTRICITY');
-  const [expAmount, setExpAmount] = useState(5000);
-  const [expPayMode, setExpPayMode] = useState('CASH');
-  const [expNotes, setExpNotes] = useState('');
-
   const loadData = async () => {
     try {
-      const [empRes, advRes, payRes, accRes] = await Promise.all([
+      const [empRes, advRes, payRes, attRes, accRes] = await Promise.all([
         fetch('/api/v1/employees').then((r) => r.json()),
         fetch('/api/v1/employees/salary-advances').then((r) => r.json()),
         fetch('/api/v1/employees/payrolls').then((r) => r.json()),
+        fetch('/api/v1/employees/attendance').then((r) => r.json()),
         fetch('/api/v1/accounts').then((r) => r.json()),
       ]);
 
-      if (empRes.success) setEmployees(empRes.data);
+      if (empRes.success) {
+        setEmployees(empRes.data);
+        if (empRes.data.length > 0) {
+          if (!attEmpId) setAttEmpId(empRes.data[0].id);
+          if (!advEmpId) setAdvEmpId(empRes.data[0].id);
+          if (!payEmpId) setPayEmpId(empRes.data[0].id);
+        }
+      }
       if (advRes.success) setAdvances(advRes.data);
       if (payRes.success) setPayrolls(payRes.data);
+      if (attRes.success) setAttendances(attRes.data);
       if (accRes.success) {
         setAccounts(accRes.data);
         if (accRes.data.length > 0) {
@@ -155,6 +166,58 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
     }
   };
 
+  // ATTENDANCE CRUD: Mark Attendance
+  const handleMarkAttendance = async () => {
+    if (!attEmpId) {
+      alert('Please select a staff member');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/v1/employees/attendance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          employeeId: attEmpId,
+          attDate,
+          status: attStatus,
+          overtimeHours: Number(attOtHours),
+          notes: attNotes,
+        }),
+      });
+
+      const json = await res.json();
+      if (json.success) {
+        const emp = employees.find((e) => e.id === attEmpId);
+        triggerToast(`Attendance marked as ${attStatus} for ${emp?.name || 'Staff'}.`);
+        setShowAttendanceModal(false);
+        loadData();
+        onRefresh();
+      } else {
+        alert(json.message || 'Error marking attendance');
+      }
+    } catch (e) {
+      alert('Network error recording attendance');
+    }
+  };
+
+  // ATTENDANCE CRUD: Delete Record
+  const handleDeleteAttendance = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this attendance entry?')) return;
+
+    try {
+      const res = await fetch(`/api/v1/employees/attendance/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (json.success) {
+        triggerToast('Attendance record deleted.');
+        loadData();
+        onRefresh();
+      }
+    } catch (e) {
+      alert('Error deleting attendance entry');
+    }
+  };
+
   // SALARY ADVANCE CRUD: Open Modal
   const handleOpenAdvanceModal = (empId?: string) => {
     const selected = employees.find((e) => e.id === empId) || employees[0];
@@ -221,25 +284,91 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
     }
   };
 
+  // Helper: Calculate attendance-based salary with 2 allowed paid holidays
+  const calculateSalaryBreakdown = (empId: string, month: number, year: number) => {
+    const selectedEmp = employees.find((e) => e.id === empId);
+    const baseRate = selectedEmp?.baseRate || 0;
+
+    // Filter attendance records for selected employee & period
+    const empAttendances = attendances.filter((att) => {
+      if (att.employeeId !== empId) return false;
+      const d = new Date(att.attDate);
+      return d.getMonth() + 1 === month && d.getFullYear() === year;
+    });
+
+    let fullDaysAbsent = 0;
+    let halfDaysCount = 0;
+    let presentDaysCount = 0;
+    let overtimeDaysCount = 0;
+    let totalOtHours = 0;
+
+    empAttendances.forEach((att) => {
+      if (att.status === 'ABSENT') fullDaysAbsent += 1;
+      else if (att.status === 'HALF_DAY') halfDaysCount += 1;
+      else if (att.status === 'PRESENT') presentDaysCount += 1;
+      else if (att.status === 'OVERTIME') {
+        overtimeDaysCount += 1;
+        totalOtHours += att.overtimeHours || 0;
+      }
+    });
+
+    const totalAbsentEquivalent = fullDaysAbsent + halfDaysCount * 0.5;
+    const allowedHolidays = 2; // 2 allowed paid holidays per month
+    const excessAbsents = Math.max(0, totalAbsentEquivalent - allowedHolidays);
+
+    const daysInMonth = new Date(year, month, 0).getDate();
+    const dailyRate = daysInMonth > 0 ? baseRate / daysInMonth : 0;
+    const deductionAmount = Math.round(excessAbsents * dailyRate);
+    const recommendedGross = Math.max(0, Math.round(baseRate - deductionAmount));
+
+    return {
+      baseRate,
+      daysInMonth,
+      fullDaysAbsent,
+      halfDaysCount,
+      presentDaysCount,
+      overtimeDaysCount,
+      totalOtHours,
+      totalAbsentEquivalent,
+      allowedHolidays,
+      excessAbsents,
+      dailyRate,
+      deductionAmount,
+      recommendedGross,
+    };
+  };
+
+  const updatePayrollForEmployeeAndPeriod = (empId: string, month: number, year: number) => {
+    const breakdown = calculateSalaryBreakdown(empId, month, year);
+    setPayGross(breakdown.recommendedGross);
+    const selectedEmp = employees.find((e) => e.id === empId);
+    const advBal = selectedEmp?.advanceBalance || 0;
+    setPayAdvanceDeducted(Math.min(breakdown.recommendedGross, advBal));
+  };
+
   // PAYROLL CRUD: Open Modal
   const handleOpenPayrollModal = (empId?: string) => {
     const selected = employees.find((e) => e.id === empId) || employees[0];
     if (selected) {
       setPayEmpId(selected.id);
-      setPayGross(selected.baseRate || 18000);
-      setPayAdvanceDeducted(Math.min(selected.baseRate || 0, selected.advanceBalance || 0));
+      updatePayrollForEmployeeAndPeriod(selected.id, payMonth, payYear);
     }
     setShowPayrollModal(true);
   };
 
-  // Update Gross & Auto-calc Advance Deduction when selecting staff in Payroll Modal
   const handlePayEmpChange = (empId: string) => {
     setPayEmpId(empId);
-    const selected = employees.find((e) => e.id === empId);
-    if (selected) {
-      setPayGross(selected.baseRate || 18000);
-      setPayAdvanceDeducted(Math.min(selected.baseRate || 0, selected.advanceBalance || 0));
-    }
+    updatePayrollForEmployeeAndPeriod(empId, payMonth, payYear);
+  };
+
+  const handlePayMonthChange = (m: number) => {
+    setPayMonth(m);
+    if (payEmpId) updatePayrollForEmployeeAndPeriod(payEmpId, m, payYear);
+  };
+
+  const handlePayYearChange = (y: number) => {
+    setPayYear(y);
+    if (payEmpId) updatePayrollForEmployeeAndPeriod(payEmpId, payMonth, y);
   };
 
   // PAYROLL CRUD: Process Settlement
@@ -313,18 +442,25 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
       {/* Header & Quick Action Buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-50 tracking-tight">Staff, Salary Advances & Payroll CRUD</h1>
+          <h1 className="text-2xl font-bold text-slate-50 tracking-tight">Staff Attendance, Advances & Payroll CRUD</h1>
           <p className="text-xs text-slate-400 mt-1">
-            Worker roster, salary advance debits & deposits, monthly wage calculations, and factory expense log
+            Staff attendance tracker, worker roster, salary advance debits & deposits, and wage calculations
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => handleOpenStaffModal()}
+            onClick={() => setShowAttendanceModal(true)}
             className="bg-cyan-500 hover:bg-cyan-400 text-carbon-950 font-bold text-xs px-3.5 py-2.5 rounded-lg shadow-lg transition flex items-center space-x-1.5"
           >
-            <UserPlus className="w-4 h-4" />
+            <CheckSquare className="w-4 h-4" />
+            <span>+ Mark Attendance</span>
+          </button>
+          <button
+            onClick={() => handleOpenStaffModal()}
+            className="bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold text-xs px-3.5 py-2.5 rounded-lg shadow-lg transition flex items-center space-x-1.5"
+          >
+            <UserPlus className="w-4 h-4 text-cyan-400" />
             <span>+ Add Staff</span>
           </button>
           <button
@@ -370,10 +506,10 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
       </div>
 
       {/* Main Tab Navigation */}
-      <div className="flex border-b border-carbon-800 space-x-2">
+      <div className="flex border-b border-carbon-800 space-x-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab('STAFF')}
-          className={`px-4 py-2.5 text-xs font-bold rounded-t-lg transition flex items-center space-x-2 ${
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-lg transition flex items-center space-x-2 whitespace-nowrap ${
             activeTab === 'STAFF'
               ? 'bg-carbon-800 text-cyan-400 border-t-2 border-cyan-400'
               : 'text-slate-400 hover:text-slate-200'
@@ -384,8 +520,20 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
         </button>
 
         <button
+          onClick={() => setActiveTab('ATTENDANCE')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-lg transition flex items-center space-x-2 whitespace-nowrap ${
+            activeTab === 'ATTENDANCE'
+              ? 'bg-carbon-800 text-cyan-400 border-t-2 border-cyan-400'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <CheckSquare className="w-4 h-4" />
+          <span>Attendance Log ({attendances.length})</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('ADVANCES')}
-          className={`px-4 py-2.5 text-xs font-bold rounded-t-lg transition flex items-center space-x-2 ${
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-lg transition flex items-center space-x-2 whitespace-nowrap ${
             activeTab === 'ADVANCES'
               ? 'bg-carbon-800 text-amber-400 border-t-2 border-amber-400'
               : 'text-slate-400 hover:text-slate-200'
@@ -397,7 +545,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
 
         <button
           onClick={() => setActiveTab('PAYROLL')}
-          className={`px-4 py-2.5 text-xs font-bold rounded-t-lg transition flex items-center space-x-2 ${
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-lg transition flex items-center space-x-2 whitespace-nowrap ${
             activeTab === 'PAYROLL'
               ? 'bg-carbon-800 text-emerald-400 border-t-2 border-emerald-400'
               : 'text-slate-400 hover:text-slate-200'
@@ -498,7 +646,85 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
         </div>
       )}
 
-      {/* TAB 2: SALARY ADVANCES LEDGER (CRUD) */}
+      {/* TAB 2: STAFF ATTENDANCE LOG (CRUD) */}
+      {activeTab === 'ATTENDANCE' && (
+        <div className="industrial-card">
+          <div className="flex items-center justify-between border-b border-carbon-700/60 pb-3">
+            <h2 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+              <CheckSquare className="w-4 h-4 text-cyan-400" />
+              <span>Daily Staff Attendance & Overtime Log</span>
+            </h2>
+            <button
+              onClick={() => setShowAttendanceModal(true)}
+              className="text-xs font-bold text-cyan-400 hover:underline"
+            >
+              + Mark Daily Attendance
+            </button>
+          </div>
+
+          {attendances.length > 0 ? (
+            <div className="overflow-x-auto mt-4">
+              <table className="w-full text-left text-xs font-mono">
+                <thead>
+                  <tr className="text-slate-400 border-b border-carbon-800">
+                    <th className="pb-3">DATE</th>
+                    <th className="pb-3">STAFF MEMBER</th>
+                    <th className="pb-3">DESIGNATION</th>
+                    <th className="pb-3">ATTENDANCE STATUS</th>
+                    <th className="pb-3">OVERTIME HOURS</th>
+                    <th className="pb-3">NOTES</th>
+                    <th className="pb-3 text-right">ACTION</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-carbon-800/60 text-slate-200">
+                  {attendances.map((att) => (
+                    <tr key={att.id} className="hover:bg-carbon-800/40">
+                      <td className="py-3 text-slate-300">{new Date(att.attDate || att.createdAt).toLocaleDateString()}</td>
+                      <td className="py-3 font-bold text-slate-100">{att.employee?.name || 'Staff Member'}</td>
+                      <td className="py-3 text-slate-400">{att.employee?.designation || '-'}</td>
+                      <td className="py-3">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                            att.status === 'PRESENT'
+                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                              : att.status === 'ABSENT'
+                              ? 'bg-red-500/20 text-red-400 border-red-500/30'
+                              : att.status === 'HALF_DAY'
+                              ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                              : 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30'
+                          }`}
+                        >
+                          {att.status}
+                        </span>
+                      </td>
+                      <td className="py-3 font-bold text-cyan-400">
+                        {att.overtimeHours > 0 ? `${att.overtimeHours} hrs` : '-'}
+                      </td>
+                      <td className="py-3 text-slate-400">{att.notes || '-'}</td>
+                      <td className="py-3 text-right">
+                        <button
+                          onClick={() => handleDeleteAttendance(att.id)}
+                          className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
+                          title="Delete Attendance Entry"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-10 text-center text-slate-500 text-xs space-y-2">
+              <Inbox className="w-8 h-8 mx-auto text-slate-600" />
+              <p>No attendance records logged yet. Click "+ Mark Daily Attendance".</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 3: SALARY ADVANCES LEDGER (CRUD) */}
       {activeTab === 'ADVANCES' && (
         <div className="industrial-card">
           <div className="flex items-center justify-between border-b border-carbon-700/60 pb-3">
@@ -564,7 +790,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
         </div>
       )}
 
-      {/* TAB 3: PAYROLL SETTLEMENT HISTORY (CRUD) */}
+      {/* TAB 4: PAYROLL SETTLEMENT HISTORY (CRUD) */}
       {activeTab === 'PAYROLL' && (
         <div className="industrial-card">
           <div className="flex items-center justify-between border-b border-carbon-700/60 pb-3">
@@ -628,7 +854,100 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
         </div>
       )}
 
-      {/* MODAL 1: ADD / EDIT STAFF */}
+      {/* MODAL: MARK ATTENDANCE */}
+      {showAttendanceModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="industrial-card border-cyan-500/40 w-full max-w-lg space-y-4">
+            <h2 className="text-sm font-bold text-cyan-400 border-b border-carbon-700/60 pb-2 flex items-center space-x-2">
+              <CheckSquare className="w-4 h-4" />
+              <span>Mark Staff Daily Attendance</span>
+            </h2>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">Select Staff Member *</label>
+                <select
+                  value={attEmpId}
+                  onChange={(e) => setAttEmpId(e.target.value)}
+                  className="w-full industrial-input font-bold text-cyan-400"
+                >
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({emp.designation}) — {emp.wageType}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 mb-1 font-semibold">Attendance Date</label>
+                  <input
+                    type="date"
+                    value={attDate}
+                    onChange={(e) => setAttDate(e.target.value)}
+                    className="w-full industrial-input font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 mb-1 font-semibold">Status *</label>
+                  <select
+                    value={attStatus}
+                    onChange={(e) => setAttStatus(e.target.value)}
+                    className="w-full industrial-input font-bold text-emerald-400"
+                  >
+                    <option value="PRESENT">PRESENT (Full Day)</option>
+                    <option value="ABSENT">ABSENT</option>
+                    <option value="HALF_DAY">HALF DAY</option>
+                    <option value="OVERTIME">OVERTIME</option>
+                  </select>
+                </div>
+              </div>
+
+              {attStatus === 'OVERTIME' && (
+                <div>
+                  <label className="block text-slate-300 mb-1 font-semibold">Overtime Hours</label>
+                  <input
+                    type="number"
+                    value={attOtHours}
+                    onChange={(e) => setAttOtHours(Number(e.target.value))}
+                    className="w-full industrial-input font-mono font-bold text-cyan-400"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">Notes / Shift Details</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Night shift / Machine maintenance extra hours"
+                  value={attNotes}
+                  onChange={(e) => setAttNotes(e.target.value)}
+                  className="w-full industrial-input"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-3 border-t border-carbon-800">
+              <button
+                onClick={() => setShowAttendanceModal(false)}
+                className="px-4 py-2 rounded bg-carbon-800 text-slate-300 text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMarkAttendance}
+                className="px-5 py-2 rounded bg-cyan-500 hover:bg-cyan-400 text-carbon-950 text-xs font-bold shadow-lg"
+              >
+                Save Attendance Entry
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ADD / EDIT STAFF */}
       {showStaffModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="industrial-card border-cyan-500/40 w-full max-w-lg space-y-4">
@@ -714,7 +1033,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
         </div>
       )}
 
-      {/* MODAL 2: ISSUE SALARY ADVANCE */}
+      {/* MODAL: ISSUE SALARY ADVANCE */}
       {showAdvanceModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="industrial-card border-amber-500/40 w-full max-w-lg space-y-4">
@@ -794,7 +1113,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
         </div>
       )}
 
-      {/* MODAL 3: PAYROLL SETTLEMENT */}
+      {/* MODAL: PAYROLL SETTLEMENT */}
       {showPayrollModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="industrial-card border-emerald-500/40 w-full max-w-lg space-y-4">
@@ -827,7 +1146,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
                     min="1"
                     max="12"
                     value={payMonth}
-                    onChange={(e) => setPayMonth(Number(e.target.value))}
+                    onChange={(e) => handlePayMonthChange(Number(e.target.value))}
                     className="w-full industrial-input font-mono"
                   />
                 </div>
@@ -837,11 +1156,62 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
                   <input
                     type="number"
                     value={payYear}
-                    onChange={(e) => setPayYear(Number(e.target.value))}
+                    onChange={(e) => handlePayYearChange(Number(e.target.value))}
                     className="w-full industrial-input font-mono"
                   />
                 </div>
               </div>
+
+              {/* Attendance-Based Salary Auto-Calculation Breakdown */}
+              {payEmpId && (() => {
+                const b = calculateSalaryBreakdown(payEmpId, payMonth, payYear);
+                return (
+                  <div className="p-3 rounded-lg bg-carbon-900 border border-cyan-500/30 space-y-1.5 text-[11px]">
+                    <div className="flex justify-between items-center text-cyan-400 font-bold border-b border-carbon-800 pb-1">
+                      <span>⚡ Attendance-Based Wage Calculation ({payMonth}/{payYear})</span>
+                      <span>{b.daysInMonth} Days in Month</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-300">
+                      <div className="flex justify-between">
+                        <span>Base Rate:</span>
+                        <span className="font-mono font-semibold">₹{b.baseRate.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Daily Rate:</span>
+                        <span className="font-mono font-semibold">₹{Math.round(b.dailyRate)}/day</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Total Absents Logged:</span>
+                        <span className="font-mono font-semibold text-rose-400">{b.totalAbsentEquivalent} days</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Allowed Free Holidays:</span>
+                        <span className="font-mono font-semibold text-emerald-400">2 days</span>
+                      </div>
+                      <div className="flex justify-between font-bold">
+                        <span>Deductible Absents:</span>
+                        <span className="font-mono text-amber-400">{b.excessAbsents} days</span>
+                      </div>
+                      <div className="flex justify-between font-bold">
+                        <span>Salary Deduction:</span>
+                        <span className="font-mono text-rose-400">-₹{b.deductionAmount.toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    {b.totalAbsentEquivalent <= 2 && (
+                      <div className="text-[10px] text-emerald-400/90 font-medium italic pt-1">
+                        ✓ Within 2 allowed free holidays limit. Full base salary applies!
+                      </div>
+                    )}
+                    {b.totalAbsentEquivalent > 2 && (
+                      <div className="text-[10px] text-amber-400/90 font-medium italic pt-1">
+                        ⚠️ {b.totalAbsentEquivalent} absents logged. First 2 free; {b.excessAbsents} day(s) deducted.
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

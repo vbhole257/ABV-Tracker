@@ -502,3 +502,19 @@ VALUES
 ('rec-jeeru-01', 'prod-jeeru-160', 1000.0, 'Jeeru Masala 160ml Standard Recipe (₹131.31 Landed Cost / 30-bottle Peti)'),
 ('rec-orange-01', 'prod-orange-160', 1000.0, 'Orange Soda 160ml Standard Recipe (₹131.31 Landed Cost / 30-bottle Peti)')
 ON CONFLICT ("id") DO NOTHING;
+
+-- CreateTable Attendance
+CREATE TABLE IF NOT EXISTS "Attendance" (
+    "id" TEXT NOT NULL,
+    "employeeId" TEXT NOT NULL,
+    "attDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "status" TEXT NOT NULL,
+    "overtimeHours" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    "notes" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "Attendance_pkey" PRIMARY KEY ("id")
+);
+
+ALTER TABLE "Attendance" DROP CONSTRAINT IF EXISTS "Attendance_employeeId_fkey";
+ALTER TABLE "Attendance" ADD CONSTRAINT "Attendance_employeeId_fkey" FOREIGN KEY ("employeeId") REFERENCES "Employee"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
