@@ -11,6 +11,10 @@ async function initServer() {
   await server.register(cors, { origin: true });
   await server.register(jwt, { secret: process.env.JWT_SECRET || 'abvfoods-secret-key-2026' });
 
+  server.get('/', async () => {
+    return { status: 'OK', system: 'AbvFoods Tracker API v1.1.0', time: new Date() };
+  });
+
   server.get('/api/v1/health', async () => {
     return { status: 'OK', system: 'AbvFoods Tracker API v1.1.0', time: new Date() };
   });
@@ -538,6 +542,7 @@ async function initServer() {
   server.get('/api/v1/employees', async () => {
     const employees = await prisma.employee.findMany({
       include: { advances: true, payrolls: true },
+      orderBy: { createdAt: 'desc' },
     });
     return { success: true, data: employees };
   });
@@ -555,6 +560,24 @@ async function initServer() {
     return { success: true, data: employee };
   });
 
+  server.put('/api/v1/employees/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      name: z.string().optional(),
+      phone: z.string().optional(),
+      designation: z.string().optional(),
+      wageType: z.string().optional(),
+      baseRate: z.number().optional(),
+      isActive: z.boolean().optional(),
+    });
+    const body = schema.parse(request.body);
+    const updated = await prisma.employee.update({
+      where: { id },
+      data: body,
+    });
+    return { success: true, data: updated };
+  });
+
   server.delete('/api/v1/employees/:id', async (request) => {
     const { id } = request.params as { id: string };
     await prisma.$transaction(async (tx) => {
@@ -563,6 +586,165 @@ async function initServer() {
       await tx.employee.delete({ where: { id } });
     });
     return { success: true, message: 'Employee deleted successfully' };
+  });
+
+  // 8B. SALARY ADVANCES CRUD APIs
+  server.get('/api/v1/employees/salary-advances', async () => {
+    const advances = await prisma.salaryAdvance.findMany({
+      include: { employee: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { success: true, data: advances };
+  });
+
+  server.post('/api/v1/employees/salary-advances', async (request) => {
+    const schema = z.object({
+      employeeId: z.string(),
+      amount: z.number().positive(),
+      accountId: z.string().optional(),
+      notes: z.string().optional(),
+    });
+    const body = schema.parse(request.body);
+
+    const advance = await prisma.$transaction(async (tx) => {
+      const adv = await tx.salaryAdvance.create({
+        data: {
+          employeeId: body.employeeId,
+          amount: body.amount,
+          notes: body.notes || 'Salary Advance Issued',
+          status: 'OPEN',
+        },
+      });
+
+      await tx.employee.update({
+        where: { id: body.employeeId },
+        data: { advanceBalance: { increment: body.amount } },
+      });
+
+      if (body.accountId) {
+        await tx.account.update({
+          where: { id: body.accountId },
+          data: { balance: { decrement: body.amount } },
+        });
+
+        await tx.accountTransaction.create({
+          data: {
+            accountId: body.accountId,
+            transactionType: 'OUTFLOW',
+            amount: body.amount,
+            category: 'SALARY_ADVANCE',
+            referenceId: adv.id,
+            notes: `Salary advance to employee ID: ${body.employeeId}`,
+          },
+        });
+      }
+
+      return adv;
+    });
+
+    return { success: true, data: advance, message: 'Salary advance recorded successfully.' };
+  });
+
+  server.delete('/api/v1/employees/salary-advances/:id', async (request) => {
+    const { id } = request.params as { id: string };
+
+    await prisma.$transaction(async (tx) => {
+      const adv = await tx.salaryAdvance.findUnique({ where: { id } });
+      if (adv) {
+        await tx.employee.update({
+          where: { id: adv.employeeId },
+          data: { advanceBalance: { decrement: adv.amount } },
+        });
+        await tx.salaryAdvance.delete({ where: { id } });
+      }
+    });
+
+    return { success: true, message: 'Salary advance record deleted.' };
+  });
+
+  // 8C. PAYROLL SETTLEMENT CRUD APIs
+  server.get('/api/v1/employees/payrolls', async () => {
+    const payrolls = await prisma.payrollRecord.findMany({
+      include: { employee: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { success: true, data: payrolls };
+  });
+
+  server.post('/api/v1/employees/payrolls', async (request) => {
+    const schema = z.object({
+      employeeId: z.string(),
+      periodMonth: z.number().min(1).max(12),
+      periodYear: z.number().min(2020),
+      grossSalary: z.number().nonnegative(),
+      advanceDeducted: z.number().nonnegative().default(0),
+      paymentMode: z.string(),
+      accountId: z.string().optional(),
+    });
+    const body = schema.parse(request.body);
+    const netPaid = body.grossSalary - body.advanceDeducted;
+
+    const payroll = await prisma.$transaction(async (tx) => {
+      const record = await tx.payrollRecord.create({
+        data: {
+          employeeId: body.employeeId,
+          periodMonth: body.periodMonth,
+          periodYear: body.periodYear,
+          grossSalary: body.grossSalary,
+          advanceDeducted: body.advanceDeducted,
+          netPaid,
+          paymentMode: body.paymentMode,
+        },
+      });
+
+      if (body.advanceDeducted > 0) {
+        await tx.employee.update({
+          where: { id: body.employeeId },
+          data: { advanceBalance: { decrement: body.advanceDeducted } },
+        });
+      }
+
+      if (body.accountId && netPaid > 0) {
+        await tx.account.update({
+          where: { id: body.accountId },
+          data: { balance: { decrement: netPaid } },
+        });
+
+        await tx.accountTransaction.create({
+          data: {
+            accountId: body.accountId,
+            transactionType: 'OUTFLOW',
+            amount: netPaid,
+            category: 'PAYROLL_SETTLEMENT',
+            referenceId: record.id,
+            notes: `Payroll paid for ${body.periodMonth}/${body.periodYear}`,
+          },
+        });
+      }
+
+      return record;
+    });
+
+    return { success: true, data: payroll, message: 'Payroll processed and logged successfully.' };
+  });
+
+  server.delete('/api/v1/employees/payrolls/:id', async (request) => {
+    const { id } = request.params as { id: string };
+
+    await prisma.$transaction(async (tx) => {
+      const record = await tx.payrollRecord.findUnique({ where: { id } });
+      if (record) {
+        if (record.advanceDeducted > 0) {
+          await tx.employee.update({
+            where: { id: record.employeeId },
+            data: { advanceBalance: { increment: record.advanceDeducted } },
+          });
+        }
+        await tx.payrollRecord.delete({ where: { id } });
+      }
+    });
+
+    return { success: true, message: 'Payroll record deleted successfully.' };
   });
 
   // Start listening (DYNAMIC PORT FOR RENDER.COM DEPLOYMENT)

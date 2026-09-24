@@ -282,11 +282,14 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ onRefresh }) => {
                 onChange={(e) => setMatUnit(e.target.value)}
                 className="w-full industrial-input font-bold"
               >
+                <option value="CARTON">CARTON / Outer Box</option>
+                <option value="BOX">BOX (Boxes)</option>
+                <option value="PETI">PETI (30-Bottle Cases)</option>
                 <option value="KG">KG (Kilograms)</option>
                 <option value="LITER">LITER (Liters)</option>
-                <option value="PCS">PCS (Pieces)</option>
-                <option value="ROLL">ROLL (Rolls)</option>
-                <option value="BOX">BOX (Boxes)</option>
+                <option value="PCS">PCS (Pieces / Caps / Preforms)</option>
+                <option value="ROLL">ROLL (Rolls / Shrink Film)</option>
+                <option value="CYLINDER">CYLINDER (CO2 Gas Cylinders)</option>
               </select>
             </div>
 
