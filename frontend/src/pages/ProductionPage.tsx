@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Factory, Check, AlertCircle, Trash2, Calculator, Layers, Inbox } from 'lucide-react';
+import { Factory, Check, AlertCircle, Trash2, Edit, Calculator, Layers, Inbox } from 'lucide-react';
 
 interface ProductionPageProps {
   products: any[];
   onRefresh: () => void;
 }
 
-export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], onRefresh }) => {
-  const [selectedProduct, setSelectedProduct] = useState(products[0]?.id || '');
+export const ProductionPage: React.FC<ProductionPageProps> = ({ products: initialProducts = [], onRefresh }) => {
+  const [productList, setProductList] = useState<any[]>(initialProducts);
+  const [selectedProduct, setSelectedProduct] = useState(initialProducts[0]?.id || '');
   const [batchNo, setBatchNo] = useState(`J${new Date().toISOString().slice(2, 10).replace(/-/g, '')}01`);
   const [batchLiters, setBatchLiters] = useState<number>(1000);
   const [actualCases, setActualCases] = useState<number>(500);
@@ -17,28 +18,64 @@ export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], o
   const [batches, setBatches] = useState<any[]>([]);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; msg: string } | null>(null);
 
-  const loadBatches = () => {
-    fetch('/api/v1/production/batches')
-      .then((res) => res.json())
-      .then((json) => json.success && setBatches(json.data))
-      .catch(() => {});
+  // Edit Batch Modal State
+  const [editingBatch, setEditingBatch] = useState<any | null>(null);
+  const [editBatchNo, setEditBatchNo] = useState('');
+  const [editCases, setEditCases] = useState(500);
+
+  // Edit Product Pricing Modal State
+  const [editingProduct, setEditingProduct] = useState<any | null>(null);
+  const [prodName, setProdName] = useState('');
+  const [prodMrp, setProdMrp] = useState(10);
+  const [prodRate, setProdRate] = useState(145);
+
+  const loadData = async () => {
+    try {
+      const [bRes, pRes] = await Promise.all([
+        fetch('/api/v1/production/batches').then((r) => r.json()),
+        fetch('/api/v1/products').then((r) => r.json()),
+      ]);
+
+      if (bRes.success) setBatches(bRes.data);
+      if (pRes.success && pRes.data.length > 0) {
+        setProductList(pRes.data);
+        if (!selectedProduct) setSelectedProduct(pRes.data[0].id);
+      }
+    } catch (e) {
+      console.error('Failed loading production data:', e);
+    }
   };
 
   useEffect(() => {
-    loadBatches();
+    loadData();
   }, []);
 
-  // ADD PRODUCTION BATCH
+  // Sync selectedProduct if initialProducts updates
+  useEffect(() => {
+    if (initialProducts.length > 0) {
+      setProductList(initialProducts);
+      if (!selectedProduct) setSelectedProduct(initialProducts[0].id);
+    }
+  }, [initialProducts]);
+
+  // ADD PRODUCTION BATCH (FIXED WORKING FUNCTION)
   const handleCompleteBatch = async () => {
+    const activeProdId = selectedProduct || productList[0]?.id;
+
+    if (!activeProdId) {
+      setStatusMessage({ type: 'error', msg: 'Please select a core product first.' });
+      return;
+    }
+
     try {
       const res = await fetch('/api/v1/production/complete-batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          productId: selectedProduct || products[0]?.id,
+          productId: activeProdId,
           batchNumber: batchNo,
-          batchSizeLiters: batchLiters,
-          actualCasesProduced: actualCases,
+          batchSizeLiters: Number(batchLiters),
+          actualCasesProduced: Number(actualCases),
           mfgDate,
           expDate,
         }),
@@ -50,17 +87,52 @@ export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], o
           type: 'success',
           msg: `Production Batch #${batchNo} completed! Added ${actualCases} Peti (cases) to Finished Goods Stock.`,
         });
-        loadBatches();
+        setBatchNo(`J${new Date().toISOString().slice(2, 10).replace(/-/g, '')}${Math.floor(10 + Math.random() * 90)}`);
+        loadData();
         onRefresh();
       } else {
-        setStatusMessage({ type: 'error', msg: json.error });
+        setStatusMessage({ type: 'error', msg: json.error || 'Failed recording batch.' });
       }
     } catch (e) {
-      setStatusMessage({ type: 'success', msg: `Production Batch #${batchNo} recorded!` });
+      setStatusMessage({ type: 'error', msg: 'Network error completing production batch.' });
     }
   };
 
-  // REMOVE / DELETE PRODUCTION BATCH CRUD
+  // EDIT PRODUCTION BATCH CRUD
+  const handleOpenEditBatch = (batch: any) => {
+    setEditingBatch(batch);
+    setEditBatchNo(batch.batchNumber);
+    setEditCases(batch.actualCasesProduced);
+  };
+
+  const handleSaveBatchEdit = async () => {
+    if (!editingBatch) return;
+
+    try {
+      const res = await fetch(`/api/v1/production/batches/${editingBatch.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batchNumber: editBatchNo,
+          actualCasesProduced: Number(editCases),
+        }),
+      });
+
+      const json = await res.json();
+      if (json.success) {
+        setStatusMessage({ type: 'success', msg: `Production Batch #${editBatchNo} updated successfully!` });
+        setEditingBatch(null);
+        loadData();
+        onRefresh();
+      } else {
+        setStatusMessage({ type: 'error', msg: json.error || 'Failed updating batch.' });
+      }
+    } catch (e) {
+      setStatusMessage({ type: 'error', msg: 'Error updating batch' });
+    }
+  };
+
+  // DELETE PRODUCTION BATCH CRUD
   const handleDeleteBatch = async (id: string, batchNumber: string) => {
     if (!confirm(`Are you sure you want to remove Production Batch "${batchNumber}"? This will reverse finished goods stock.`)) return;
 
@@ -69,11 +141,45 @@ export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], o
       const json = await res.json();
       if (json.success) {
         setStatusMessage({ type: 'success', msg: `Batch #${batchNumber} removed successfully!` });
-        loadBatches();
+        loadData();
         onRefresh();
       }
     } catch (e) {
       alert('Error removing production batch');
+    }
+  };
+
+  // EDIT PRODUCT PRICING CRUD
+  const handleOpenEditProduct = (prod: any) => {
+    setEditingProduct(prod);
+    setProdName(prod.name);
+    setProdMrp(prod.mrpPerBottle || 10);
+    setProdRate(prod.defaultPricePerCase || 145);
+  };
+
+  const handleSaveProductEdit = async () => {
+    if (!editingProduct) return;
+
+    try {
+      const res = await fetch(`/api/v1/products/${editingProduct.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: prodName,
+          mrpPerBottle: Number(prodMrp),
+          defaultPricePerCase: Number(prodRate),
+        }),
+      });
+
+      const json = await res.json();
+      if (json.success) {
+        setStatusMessage({ type: 'success', msg: `Product "${prodName}" updated successfully!` });
+        setEditingProduct(null);
+        loadData();
+        onRefresh();
+      }
+    } catch (e) {
+      alert('Error updating product rates');
     }
   };
 
@@ -116,8 +222,35 @@ export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], o
       <div>
         <h1 className="text-2xl font-bold text-slate-50 tracking-tight">Production Management & Unit Economics</h1>
         <p className="text-xs text-slate-400 mt-1">
-          Execute production batches, remove batches (CRUD), and view ₹10 bottle unit economics & BOM landed costs
+          Execute production batches, edit batch details (CRUD), and view ₹10 bottle unit economics & BOM landed costs
         </p>
+      </div>
+
+      {/* CORE PRODUCTS LIST & PRICE EDITING */}
+      <div className="industrial-card">
+        <h2 className="text-sm font-bold text-slate-100 flex items-center justify-between border-b border-carbon-700/60 pb-3">
+          <span>Core Products & Default Rates (CRUD)</span>
+          <span className="text-xs text-slate-400 font-mono">{productList.length} Products</span>
+        </h2>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+          {productList.map((prod) => (
+            <div key={prod.id} className="p-3 rounded-lg bg-carbon-900 border border-carbon-800 flex justify-between items-center">
+              <div>
+                <div className="font-bold text-slate-100 text-sm">{prod.name}</div>
+                <div className="text-xs text-slate-400">SKU: {prod.skuCode} | MRP: ₹{prod.mrpPerBottle}/btl</div>
+                <div className="text-xs text-cyan-400 font-bold font-mono">Default Rate: ₹{prod.defaultPricePerCase}/Peti</div>
+              </div>
+              <button
+                onClick={() => handleOpenEditProduct(prod)}
+                className="px-3 py-1.5 rounded bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 border border-cyan-500/30 text-xs font-bold flex items-center space-x-1"
+              >
+                <Edit className="w-3.5 h-3.5" />
+                <span>Edit Rate</span>
+              </button>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* 1. UNIT ECONOMICS & PROFIT MARGIN REALIZATION */}
@@ -216,18 +349,22 @@ export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], o
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">Select Core Product</label>
-            <select
-              value={selectedProduct}
-              onChange={(e) => setSelectedProduct(e.target.value)}
-              className="w-full industrial-input font-bold"
-            >
-              {products.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.skuCode})
-                </option>
-              ))}
-            </select>
+            <label className="block text-xs font-semibold text-slate-300 mb-1">Select Core Product *</label>
+            {productList.length > 0 ? (
+              <select
+                value={selectedProduct}
+                onChange={(e) => setSelectedProduct(e.target.value)}
+                className="w-full industrial-input font-bold text-cyan-400"
+              >
+                {productList.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.skuCode})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <p className="text-xs text-amber-400">Loading products...</p>
+            )}
           </div>
 
           <div>
@@ -236,7 +373,7 @@ export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], o
               type="text"
               value={batchNo}
               onChange={(e) => setBatchNo(e.target.value)}
-              className="w-full industrial-input"
+              className="w-full industrial-input font-mono"
             />
           </div>
 
@@ -313,7 +450,7 @@ export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], o
                   <th className="pb-2">PETI PRODUCED</th>
                   <th className="pb-2">MFG DATE</th>
                   <th className="pb-2">STATUS</th>
-                  <th className="pb-2 text-right">ACTION</th>
+                  <th className="pb-2 text-right">ACTIONS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-carbon-800/60 text-slate-200">
@@ -328,7 +465,14 @@ export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], o
                         {b.status}
                       </span>
                     </td>
-                    <td className="py-2.5 text-right">
+                    <td className="py-2.5 text-right space-x-1">
+                      <button
+                        onClick={() => handleOpenEditBatch(b)}
+                        className="p-1.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                        title="Edit Batch Details"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => handleDeleteBatch(b.id, b.batchNumber)}
                         className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
@@ -349,6 +493,112 @@ export const ProductionPage: React.FC<ProductionPageProps> = ({ products = [], o
           </div>
         )}
       </div>
+
+      {/* MODAL: EDIT PRODUCTION BATCH */}
+      {editingBatch && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="industrial-card border-cyan-500/40 w-full max-w-md space-y-4">
+            <h2 className="text-sm font-bold text-cyan-400 border-b border-carbon-700/60 pb-2">
+              Edit Production Batch #{editingBatch.batchNumber}
+            </h2>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">Batch Number</label>
+                <input
+                  type="text"
+                  value={editBatchNo}
+                  onChange={(e) => setEditBatchNo(e.target.value)}
+                  className="w-full industrial-input font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">Actual Cases (Peti) Produced</label>
+                <input
+                  type="number"
+                  value={editCases}
+                  onChange={(e) => setEditCases(Number(e.target.value))}
+                  className="w-full industrial-input font-mono font-bold text-emerald-400"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-3 border-t border-carbon-800">
+              <button
+                onClick={() => setEditingBatch(null)}
+                className="px-4 py-2 rounded bg-carbon-800 text-slate-300 text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveBatchEdit}
+                className="px-5 py-2 rounded bg-cyan-500 hover:bg-cyan-400 text-carbon-950 text-xs font-bold shadow-lg"
+              >
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: EDIT PRODUCT RATES */}
+      {editingProduct && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="industrial-card border-cyan-500/40 w-full max-w-md space-y-4">
+            <h2 className="text-sm font-bold text-cyan-400 border-b border-carbon-700/60 pb-2">
+              Edit Product: {editingProduct.name}
+            </h2>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">Product Name</label>
+                <input
+                  type="text"
+                  value={prodName}
+                  onChange={(e) => setProdName(e.target.value)}
+                  className="w-full industrial-input font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">MRP per Bottle (₹)</label>
+                <input
+                  type="number"
+                  value={prodMrp}
+                  onChange={(e) => setProdMrp(Number(e.target.value))}
+                  className="w-full industrial-input font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">Default Rate per Peti (₹)</label>
+                <input
+                  type="number"
+                  value={prodRate}
+                  onChange={(e) => setProdRate(Number(e.target.value))}
+                  className="w-full industrial-input font-mono font-bold text-cyan-400"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-3 border-t border-carbon-800">
+              <button
+                onClick={() => setEditingProduct(null)}
+                className="px-4 py-2 rounded bg-carbon-800 text-slate-300 text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveProductEdit}
+                className="px-5 py-2 rounded bg-cyan-500 hover:bg-cyan-400 text-carbon-950 text-xs font-bold shadow-lg"
+              >
+                Save Product Rates
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

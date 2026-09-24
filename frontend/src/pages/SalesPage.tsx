@@ -6,6 +6,7 @@ import {
   Check, 
   UserCheck, 
   UserPlus, 
+  Edit,
   Trash2, 
   Inbox 
 } from 'lucide-react';
@@ -25,8 +26,9 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 }) => {
   const [showNewOrder, setShowNewOrder] = useState(openNewSaleModal);
   const [showAddWholesalerModal, setShowAddWholesalerModal] = useState(false);
+  const [editingWholesalerId, setEditingWholesalerId] = useState<string | null>(null);
 
-  // Wholesaler Form State (No Tier Dropdown)
+  // Wholesaler Form State (Add / Edit)
   const [wName, setWName] = useState('');
   const [wContact, setWContact] = useState('');
   const [wPhone, setWPhone] = useState('');
@@ -67,40 +69,60 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     }, 0);
   };
 
-  // ADD WHOLESALER (NO TIER DROPDOWN)
-  const handleAddWholesaler = async () => {
+  // OPEN ADD / EDIT WHOLESALER MODAL (CRUD)
+  const handleOpenWholesalerModal = (w?: any) => {
+    if (w) {
+      setEditingWholesalerId(w.id);
+      setWName(w.businessName);
+      setWContact(w.contactPerson);
+      setWPhone(w.mobile);
+      setWAddress(w.address || '');
+      setWCredit(w.creditLimit || 50000);
+    } else {
+      setEditingWholesalerId(null);
+      setWName('');
+      setWContact('');
+      setWPhone('');
+      setWAddress('');
+      setWCredit(50000);
+    }
+    setShowAddWholesalerModal(true);
+  };
+
+  // SAVE WHOLESALER (CREATE / UPDATE)
+  const handleSaveWholesaler = async () => {
     if (!wName || !wContact || !wPhone) {
       alert('Please fill in Wholesaler Business Name, Contact Person, and Phone number');
       return;
     }
 
     try {
-      const res = await fetch('/api/v1/wholesalers', {
-        method: 'POST',
+      const endpoint = editingWholesalerId ? `/api/v1/wholesalers/${editingWholesalerId}` : '/api/v1/wholesalers';
+      const method = editingWholesalerId ? 'PUT' : 'POST';
+
+      const res = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           businessName: wName,
           contactPerson: wContact,
           mobile: wPhone,
           address: wAddress,
-          creditLimit: wCredit,
+          creditLimit: Number(wCredit),
         }),
       });
 
       const json = await res.json();
       if (json.success) {
-        setSuccessToast(`Wholesaler "${wName}" added successfully!`);
+        setSuccessToast(`Wholesaler "${wName}" ${editingWholesalerId ? 'updated' : 'added'} successfully!`);
         setShowAddWholesalerModal(false);
-        setWName('');
-        setWContact('');
-        setWPhone('');
         onRefresh();
         setTimeout(() => setSuccessToast(''), 4000);
       } else {
-        alert(json.error);
+        alert(json.error || 'Error saving wholesaler');
       }
     } catch (e) {
-      alert('Error adding wholesaler');
+      alert('Error saving wholesaler account');
     }
   };
 
@@ -187,14 +209,14 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       {/* Header & CRUD Action Buttons */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-50 tracking-tight">Wholesale Sales & Payments</h1>
+          <h1 className="text-2xl font-bold text-slate-50 tracking-tight">Wholesale Sales & Payments (CRUD)</h1>
           <p className="text-xs text-slate-400 mt-1">
-            Manage wholesaler accounts, enter custom numeric selling prices per Peti, and record dispatches
+            Manage wholesaler accounts, edit details, enter custom numeric selling prices per Peti, and record dispatches
           </p>
         </div>
         <div className="flex items-center space-x-3">
           <button
-            onClick={() => setShowAddWholesalerModal(!showAddWholesalerModal)}
+            onClick={() => handleOpenWholesalerModal()}
             className="bg-cyan-500 hover:bg-cyan-400 text-carbon-950 font-bold text-xs px-4 py-2.5 rounded-lg shadow-lg transition flex items-center space-x-2"
           >
             <UserPlus className="w-4 h-4" />
@@ -210,12 +232,12 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         </div>
       </div>
 
-      {/* ADD WHOLESALER MODAL (NO DROPDOWN TIER) */}
+      {/* ADD / EDIT WHOLESALER MODAL (CRUD) */}
       {showAddWholesalerModal && (
         <div className="industrial-card border-cyan-500/40 space-y-4">
           <h2 className="text-sm font-bold text-cyan-400 border-b border-carbon-700/60 pb-2 flex items-center space-x-2">
             <UserPlus className="w-4 h-4" />
-            <span>Add New Wholesaler / Distributor Account</span>
+            <span>{editingWholesalerId ? 'Edit Wholesaler Account' : 'Add New Wholesaler / Distributor Account'}</span>
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -226,7 +248,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 placeholder="e.g. Metro Cold Drink Wholesalers"
                 value={wName}
                 onChange={(e) => setWName(e.target.value)}
-                className="w-full industrial-input"
+                className="w-full industrial-input font-bold"
               />
             </div>
 
@@ -248,7 +270,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 placeholder="e.g. +91 98901 55443"
                 value={wPhone}
                 onChange={(e) => setWPhone(e.target.value)}
-                className="w-full industrial-input"
+                className="w-full industrial-input font-mono"
               />
             </div>
           </div>
@@ -271,7 +293,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 type="number"
                 value={wCredit}
                 onChange={(e) => setWCredit(Number(e.target.value))}
-                className="w-full industrial-input font-mono"
+                className="w-full industrial-input font-mono font-bold"
               />
             </div>
           </div>
@@ -284,16 +306,16 @@ export const SalesPage: React.FC<SalesPageProps> = ({
               Cancel
             </button>
             <button
-              onClick={handleAddWholesaler}
+              onClick={handleSaveWholesaler}
               className="px-5 py-2 rounded bg-cyan-500 hover:bg-cyan-400 text-carbon-950 text-xs font-bold shadow-lg"
             >
-              Save Wholesaler Account
+              {editingWholesalerId ? 'Save Wholesaler Changes' : 'Save Wholesaler Account'}
             </button>
           </div>
         </div>
       )}
 
-      {/* CREATE NEW SALES ORDER DISPATCH (DIRECT NUMERIC RATES) */}
+      {/* CREATE NEW SALES ORDER DISPATCH */}
       {showNewOrder && (
         <div className="industrial-card border-emerald-500/30 space-y-6">
           <div className="flex items-center justify-between border-b border-carbon-700/60 pb-3">
@@ -484,7 +506,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         <h2 className="text-sm font-bold text-slate-100 flex items-center justify-between border-b border-carbon-700/60 pb-3">
           <span className="flex items-center space-x-2">
             <UserCheck className="w-4 h-4 text-cyan-400" />
-            <span>Wholesaler & Distributor Directory</span>
+            <span>Wholesaler & Distributor Directory (CRUD)</span>
           </span>
           <span className="text-xs text-slate-400 font-mono">
             {wholesalers.length} Wholesalers
@@ -501,7 +523,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                   <th className="pb-3 font-semibold">CREDIT LIMIT</th>
                   <th className="pb-3 font-semibold">OUTSTANDING</th>
                   <th className="pb-3 font-semibold">CRATES HELD</th>
-                  <th className="pb-3 font-semibold text-right">ACTION</th>
+                  <th className="pb-3 font-semibold text-right">ACTIONS</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-carbon-800/60 text-slate-200">
@@ -514,15 +536,22 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                       ₹{(w.currentOutstanding || 0).toLocaleString('en-IN')}
                     </td>
                     <td className="py-3 font-mono text-amber-400 font-bold">{w.cratesHeld || 0} Crates</td>
-                    <td className="py-3 text-right space-x-2">
+                    <td className="py-3 text-right space-x-1">
                       <button
                         onClick={() => {
                           setSelectedWholesaler(w.id);
                           setShowNewOrder(true);
                         }}
-                        className="text-xs bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 px-3 py-1 rounded font-semibold transition"
+                        className="text-xs bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 px-2.5 py-1 rounded font-semibold transition"
                       >
                         + Order
+                      </button>
+                      <button
+                        onClick={() => handleOpenWholesalerModal(w)}
+                        className="p-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                        title="Edit Wholesaler"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
                       </button>
                       <button
                         onClick={() => handleDeleteWholesaler(w.id, w.businessName)}

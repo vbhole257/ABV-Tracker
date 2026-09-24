@@ -157,6 +157,33 @@ async function initServer() {
     return { success: true, data: products };
   });
 
+  server.get('/api/v1/finished-goods', async () => {
+    const stocks = await prisma.finishedGoodsStock.findMany({
+      include: { product: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (stocks.length === 0) {
+      const products = await prisma.product.findMany({ where: { isActive: true } });
+      const formatted = products.map((p) => ({
+        id: `fg-${p.id}`,
+        productId: p.id,
+        product: p,
+        casesAvailable: 0,
+        warehouseLocation: 'Main Factory Storage',
+        updatedAt: p.createdAt,
+      }));
+      return { success: true, data: formatted };
+    }
+    return { success: true, data: stocks };
+  });
+
+  server.get('/api/v1/accounts', async () => {
+    const accounts = await prisma.account.findMany({
+      orderBy: { createdAt: 'asc' },
+    });
+    return { success: true, data: accounts };
+  });
+
   server.post('/api/v1/products', async (request) => {
     const schema = z.object({
       name: z.string(),
@@ -170,6 +197,20 @@ async function initServer() {
     const body = schema.parse(request.body);
     const product = await prisma.product.create({ data: body });
     return { success: true, data: product };
+  });
+
+  server.put('/api/v1/products/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      name: z.string().optional(),
+      flavor: z.string().optional(),
+      mrpPerBottle: z.number().optional(),
+      defaultPricePerCase: z.number().optional(),
+      skuCode: z.string().optional(),
+    });
+    const body = schema.parse(request.body);
+    const updated = await prisma.product.update({ where: { id }, data: body });
+    return { success: true, data: updated };
   });
 
   server.delete('/api/v1/products/:id', async (request) => {
@@ -201,6 +242,21 @@ async function initServer() {
     const body = schema.parse(request.body);
     const supplier = await prisma.supplier.create({ data: body });
     return { success: true, data: supplier };
+  });
+
+  server.put('/api/v1/suppliers/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      name: z.string().optional(),
+      contactPerson: z.string().optional(),
+      phone: z.string().optional(),
+      address: z.string().optional(),
+      gstNumber: z.string().optional(),
+      currentOutstanding: z.number().optional(),
+    });
+    const body = schema.parse(request.body);
+    const updated = await prisma.supplier.update({ where: { id }, data: body });
+    return { success: true, data: updated };
   });
 
   server.delete('/api/v1/suppliers/:id', async (request) => {
@@ -304,6 +360,20 @@ async function initServer() {
     return { success: true, data: material };
   });
 
+  server.put('/api/v1/raw-materials/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      name: z.string().optional(),
+      unit: z.string().optional(),
+      currentQuantity: z.number().optional(),
+      reorderLevel: z.number().optional(),
+      lastPurchaseRate: z.number().optional(),
+    });
+    const body = schema.parse(request.body);
+    const updated = await prisma.rawMaterial.update({ where: { id }, data: body });
+    return { success: true, data: updated };
+  });
+
   server.delete('/api/v1/raw-materials/:id', async (request) => {
     const { id } = request.params as { id: string };
     await prisma.rawMaterial.delete({ where: { id } });
@@ -377,6 +447,18 @@ async function initServer() {
     return { success: true, data: batch };
   });
 
+  server.put('/api/v1/production/batches/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      batchNumber: z.string().optional(),
+      actualCasesProduced: z.number().optional(),
+      status: z.string().optional(),
+    });
+    const body = schema.parse(request.body);
+    const updated = await prisma.productionBatch.update({ where: { id }, data: body });
+    return { success: true, data: updated };
+  });
+
   server.delete('/api/v1/production/batches/:id', async (request) => {
     const { id } = request.params as { id: string };
 
@@ -413,6 +495,21 @@ async function initServer() {
       },
     });
     return { success: true, data: wholesaler };
+  });
+
+  server.put('/api/v1/wholesalers/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      businessName: z.string().optional(),
+      contactPerson: z.string().optional(),
+      mobile: z.string().optional(),
+      address: z.string().optional(),
+      creditLimit: z.number().optional(),
+      currentOutstanding: z.number().optional(),
+    });
+    const body = schema.parse(request.body);
+    const updated = await prisma.wholesaler.update({ where: { id }, data: body });
+    return { success: true, data: updated };
   });
 
   server.delete('/api/v1/wholesalers/:id', async (request) => {
