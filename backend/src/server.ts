@@ -11,6 +11,14 @@ async function initServer() {
   await server.register(cors, { origin: true });
   await server.register(jwt, { secret: process.env.JWT_SECRET || 'abvfoods-secret-key-2026' });
 
+  server.setErrorHandler((error, request, reply) => {
+    server.log.error(error);
+    reply.status(500).send({
+      success: false,
+      error: error.message || 'Internal Server Error',
+    });
+  });
+
   server.get('/', async () => {
     return { status: 'OK', system: 'AbvFoods Tracker API v1.1.0', time: new Date() };
   });
