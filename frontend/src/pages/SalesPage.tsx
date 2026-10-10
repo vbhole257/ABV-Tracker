@@ -54,6 +54,13 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     }));
   };
 
+  const handleSetExactQty = (productId: string, qty: number) => {
+    setCasesQty((prev) => ({
+      ...prev,
+      [productId]: Math.max(0, qty),
+    }));
+  };
+
   const handleRateChange = (productId: string, rate: number) => {
     setCustomRates((prev) => ({
       ...prev,
@@ -401,18 +408,28 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                               <div className="flex items-center space-x-1">
                                 <button
                                   type="button"
-                                  onClick={() => handleQtyChange(p.id, -5)}
-                                  className="w-8 h-8 rounded bg-carbon-800 hover:bg-carbon-700 text-slate-200 flex items-center justify-center font-bold"
+                                  onClick={() => handleQtyChange(p.id, -1)}
+                                  className="w-8 h-8 rounded bg-carbon-800 hover:bg-carbon-700 text-slate-200 flex items-center justify-center font-bold shrink-0"
+                                  title="Decrease by 1"
                                 >
                                   <Minus className="w-3.5 h-3.5" />
                                 </button>
-                                <span className="flex-1 text-center font-mono font-bold text-sm text-slate-100">
-                                  {qty}
-                                </span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={qty === 0 ? '' : qty}
+                                  onChange={(e) => {
+                                    const val = parseInt(e.target.value, 10);
+                                    handleSetExactQty(p.id, isNaN(val) ? 0 : Math.max(0, val));
+                                  }}
+                                  placeholder="0"
+                                  className="w-full text-center industrial-input font-mono font-bold text-sm text-cyan-400 py-1"
+                                />
                                 <button
                                   type="button"
-                                  onClick={() => handleQtyChange(p.id, 5)}
-                                  className="w-8 h-8 rounded bg-carbon-800 hover:bg-carbon-700 text-slate-200 flex items-center justify-center font-bold"
+                                  onClick={() => handleQtyChange(p.id, 1)}
+                                  className="w-8 h-8 rounded bg-carbon-800 hover:bg-carbon-700 text-slate-200 flex items-center justify-center font-bold shrink-0"
+                                  title="Increase by 1"
                                 >
                                   <Plus className="w-3.5 h-3.5" />
                                 </button>
