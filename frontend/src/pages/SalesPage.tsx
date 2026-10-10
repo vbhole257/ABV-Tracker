@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShoppingCart, 
   Plus, 
@@ -6,9 +6,12 @@ import {
   Check, 
   UserCheck, 
   UserPlus, 
-  Edit,
+  Edit, 
   Trash2, 
-  Inbox 
+  Inbox,
+  FileText,
+  Clock,
+  XCircle
 } from 'lucide-react';
 
 interface SalesPageProps {
@@ -24,7 +27,11 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   onRefresh,
   openNewSaleModal = false
 }) => {
+  const [orders, setOrders] = useState<any[]>([]);
   const [showNewOrder, setShowNewOrder] = useState(openNewSaleModal);
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [editingInvoiceNumber, setEditingInvoiceNumber] = useState<string>('');
+
   const [showAddWholesalerModal, setShowAddWholesalerModal] = useState(false);
   const [editingWholesalerId, setEditingWholesalerId] = useState<string | null>(null);
 
@@ -44,6 +51,22 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const [cratesIssued, setCratesIssued] = useState<number>(0);
   const [refNo, setRefNo] = useState('');
   const [successToast, setSuccessToast] = useState('');
+
+  const loadOrders = async () => {
+    try {
+      const res = await fetch('/api/v1/sales/orders');
+      const json = await res.json();
+      if (json.success) {
+        setOrders(json.data);
+      }
+    } catch (e) {
+      console.error('Error loading sales orders:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadOrders();
+  }, []);
 
   const currentWholesaler = wholesalers.find((w) => w.id === selectedWholesaler) || wholesalers[0];
 
@@ -74,6 +97,42 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       const rate = customRates[p.id] !== undefined ? customRates[p.id] : (p.defaultPricePerCase || 160);
       return sum + qty * rate;
     }, 0);
+  };
+
+  // RESET ORDER FORM
+  const resetOrderForm = () => {
+    setEditingOrderId(null);
+    setEditingInvoiceNumber('');
+    setCasesQty({});
+    setCustomRates({});
+    setPaidAmount(0);
+    setCratesIssued(0);
+    setRefNo('');
+  };
+
+  // OPEN EDIT ORDER (CRUD UPDATE)
+  const handleOpenEditOrder = (order: any) => {
+    setEditingOrderId(order.id);
+    setEditingInvoiceNumber(order.invoiceNumber);
+    setSelectedWholesaler(order.wholesalerId);
+    setCratesIssued(order.cratesIssued || 0);
+    setPaidAmount(order.paidAmount || 0);
+    setPaymentMode(order.paymentMode || 'CASH');
+
+    const newQty: { [key: string]: number } = {};
+    const newRates: { [key: string]: number } = {};
+
+    if (order.items && Array.isArray(order.items)) {
+      order.items.forEach((item: any) => {
+        newQty[item.productId] = item.casesQuantity;
+        newRates[item.productId] = item.pricePerCase;
+      });
+    }
+
+    setCasesQty(newQty);
+    setCustomRates(newRates);
+    setShowNewOrder(true);
+    window.scrollTo({ top: 100, behavior: 'smooth' });
   };
 
   // OPEN ADD / EDIT WHOLESALER MODAL (CRUD)
@@ -150,8 +209,8 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     }
   };
 
-  // CREATE SALES ORDER WITH EXPLICIT NUMERIC RATES
-  const handleCreateOrder = async () => {
+  // CREATE OR EDIT SALES ORDER (POST / PUT)
+  const handleSaveOrder = async () => {
     const items = Object.entries(casesQty)
       .filter(([_, qty]) => qty > 0)
       .map(([productId, casesQuantity]) => {
@@ -171,15 +230,18 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       return;
     }
 
+    const endpoint = editingOrderId ? `/api/v1/sales/orders/${editingOrderId}` : '/api/v1/sales/orders';
+    const method = editingOrderId ? 'PUT' : 'POST';
+
     try {
-      const res = await fetch('/api/v1/sales/orders', {
-        method: 'POST',
+      const res = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           wholesalerId: selectedWholesaler || wholesalers[0]?.id,
-          invoiceNumber: `INV-${Math.floor(1000 + Math.random() * 9000)}`,
-          cratesIssued,
-          paidAmount,
+          invoiceNumber: editingOrderId ? editingInvoiceNumber : `INV-${Math.floor(1000 + Math.random() * 9000)}`,
+          cratesIssued: Number(cratesIssued),
+          paidAmount: Number(paidAmount),
           paymentMode,
           referenceNo: refNo,
           items,
@@ -188,17 +250,35 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
       const json = await res.json();
       if (json.success) {
-        setSuccessToast(`Sales Order Invoice #${json.data.invoiceNumber} created successfully!`);
+        setSuccessToast(`Sales Order Invoice #${json.data.invoiceNumber} ${editingOrderId ? 'updated' : 'created'} successfully!`);
         setShowNewOrder(false);
+        resetOrderForm();
+        loadOrders();
         onRefresh();
         setTimeout(() => setSuccessToast(''), 4000);
       } else {
-        alert(`Error creating order: ${json.error}`);
+        alert(`Error saving order: ${json.error}`);
       }
     } catch (e) {
-      setSuccessToast(`Sales Order Recorded!`);
-      setShowNewOrder(false);
-      setTimeout(() => setSuccessToast(''), 4000);
+      alert('Error saving sales order');
+    }
+  };
+
+  // DELETE / ROLLBACK ORDER (DELETE)
+  const handleDeleteOrder = async (id: string, invoiceNumber: string) => {
+    if (!confirm(`Are you sure you want to delete/rollback Order Invoice #${invoiceNumber}? This will restore the wholesaler's balance & crates.`)) return;
+
+    try {
+      const res = await fetch(`/api/v1/sales/orders/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (json.success) {
+        setSuccessToast(`Order Invoice #${invoiceNumber} deleted & balance restored.`);
+        loadOrders();
+        onRefresh();
+        setTimeout(() => setSuccessToast(''), 4000);
+      }
+    } catch (e) {
+      alert('Error deleting sales order entry');
     }
   };
 
@@ -218,7 +298,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         <div>
           <h1 className="text-2xl font-bold text-slate-50 tracking-tight">Wholesale Sales & Payments (CRUD)</h1>
           <p className="text-xs text-slate-400 mt-1">
-            Manage wholesaler accounts, edit details, enter custom numeric selling prices per Peti, and record dispatches
+            Manage wholesaler accounts, record dispatches, edit past sales orders, and process payments
           </p>
         </div>
         <div className="flex items-center space-x-3">
@@ -230,7 +310,12 @@ export const SalesPage: React.FC<SalesPageProps> = ({
             <span>+ Add Wholesaler</span>
           </button>
           <button
-            onClick={() => setShowNewOrder(!showNewOrder)}
+            onClick={() => {
+              if (showNewOrder && editingOrderId) {
+                resetOrderForm();
+              }
+              setShowNewOrder(!showNewOrder);
+            }}
             className="bg-emerald-500 hover:bg-emerald-400 text-carbon-950 font-bold text-xs px-4 py-2.5 rounded-lg shadow-lg transition flex items-center space-x-2"
           >
             <ShoppingCart className="w-4 h-4" />
@@ -322,14 +407,30 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         </div>
       )}
 
-      {/* CREATE NEW SALES ORDER DISPATCH */}
+      {/* CREATE / EDIT SALES ORDER DISPATCH (CRUD) */}
       {showNewOrder && (
-        <div className="industrial-card border-emerald-500/30 space-y-6">
+        <div className={`industrial-card space-y-6 ${editingOrderId ? 'border-amber-500/50' : 'border-emerald-500/30'}`}>
           <div className="flex items-center justify-between border-b border-carbon-700/60 pb-3">
-            <h2 className="text-base font-bold text-emerald-400 flex items-center space-x-2">
+            <h2 className={`text-base font-bold flex items-center space-x-2 ${editingOrderId ? 'text-amber-400' : 'text-emerald-400'}`}>
               <ShoppingCart className="w-5 h-5" />
-              <span>New Wholesale Order Dispatch Invoice Generator</span>
+              <span>
+                {editingOrderId 
+                  ? `Editing Dispatched Sales Order #${editingInvoiceNumber}` 
+                  : 'New Wholesale Order Dispatch Invoice Generator'}
+              </span>
             </h2>
+            {editingOrderId && (
+              <button
+                onClick={() => {
+                  resetOrderForm();
+                  setShowNewOrder(false);
+                }}
+                className="text-xs bg-carbon-800 hover:bg-carbon-700 text-slate-300 px-3 py-1 rounded font-bold flex items-center space-x-1"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                <span>Cancel Editing</span>
+              </button>
+            )}
           </div>
 
           {wholesalers.length > 0 ? (
@@ -505,10 +606,14 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 </div>
 
                 <button
-                  onClick={handleCreateOrder}
-                  className="w-full sm:w-auto bg-emerald-500 hover:bg-emerald-400 text-carbon-950 font-bold px-6 py-3 rounded-lg shadow-lg shadow-emerald-500/20 text-sm transition"
+                  onClick={handleSaveOrder}
+                  className={`w-full sm:w-auto font-bold px-6 py-3 rounded-lg shadow-lg text-sm transition ${
+                    editingOrderId 
+                      ? 'bg-amber-500 hover:bg-amber-400 text-carbon-950 shadow-amber-500/20' 
+                      : 'bg-emerald-500 hover:bg-emerald-400 text-carbon-950 shadow-emerald-500/20'
+                  }`}
                 >
-                  Confirm & Generate Invoice
+                  {editingOrderId ? 'Save Sales Order Changes' : 'Confirm & Generate Invoice'}
                 </button>
               </div>
             </>
@@ -517,6 +622,112 @@ export const SalesPage: React.FC<SalesPageProps> = ({
           )}
         </div>
       )}
+
+      {/* DISPATCHED SALES ORDERS HISTORY TABLE (CRUD) */}
+      <div className="industrial-card">
+        <h2 className="text-sm font-bold text-slate-100 flex items-center justify-between border-b border-carbon-700/60 pb-3">
+          <span className="flex items-center space-x-2">
+            <FileText className="w-4 h-4 text-emerald-400" />
+            <span>Dispatched Sales Orders Ledger (CRUD)</span>
+          </span>
+          <span className="text-xs text-slate-400 font-mono">
+            {orders.length} Invoices Logged
+          </span>
+        </h2>
+
+        {orders.length > 0 ? (
+          <div className="overflow-x-auto mt-4">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="text-slate-400 border-b border-carbon-800 font-mono">
+                  <th className="pb-3 font-semibold">INVOICE & DATE</th>
+                  <th className="pb-3 font-semibold">WHOLESALER FIRM</th>
+                  <th className="pb-3 font-semibold">ITEMS & QUANTITY</th>
+                  <th className="pb-3 font-semibold">CRATES</th>
+                  <th className="pb-3 font-semibold">TOTAL AMOUNT</th>
+                  <th className="pb-3 font-semibold">PAID / STATUS</th>
+                  <th className="pb-3 font-semibold text-right">ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-carbon-800/60 text-slate-200">
+                {orders.map((o) => {
+                  const unpaid = o.totalAmount - (o.paidAmount || 0);
+                  return (
+                    <tr key={o.id} className="hover:bg-carbon-800/40">
+                      <td className="py-3 font-mono">
+                        <span className="font-bold text-cyan-400 block">{o.invoiceNumber}</span>
+                        <span className="text-[10px] text-slate-500 flex items-center space-x-1">
+                          <Clock className="w-3 h-3" />
+                          <span>{new Date(o.dispatchDate || o.createdAt).toLocaleDateString()}</span>
+                        </span>
+                      </td>
+
+                      <td className="py-3 font-bold text-slate-100">
+                        {o.wholesaler?.businessName || 'Wholesaler'}
+                      </td>
+
+                      <td className="py-3 font-mono text-xs">
+                        {o.items && o.items.length > 0 ? (
+                          o.items.map((item: any, idx: number) => (
+                            <span key={idx} className="block text-[11px] text-slate-300">
+                              • {item.product?.name || 'Product'}: <strong className="text-cyan-400">{item.casesQuantity} Peti</strong> @ ₹{item.pricePerCase}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-slate-500">No item details</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 font-mono text-amber-400 font-bold">
+                        {o.cratesIssued || 0} Crates
+                      </td>
+
+                      <td className="py-3 font-mono font-bold text-slate-100 text-sm">
+                        ₹{(o.totalAmount || 0).toLocaleString('en-IN')}
+                      </td>
+
+                      <td className="py-3 font-mono">
+                        <div className="font-bold text-emerald-400">₹{(o.paidAmount || 0).toLocaleString('en-IN')}</div>
+                        <span className={`text-[10px] px-2 py-0.5 rounded font-bold inline-block mt-0.5 ${
+                          o.paymentStatus === 'PAID'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                            : o.paymentStatus === 'PARTIAL'
+                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                            : 'bg-red-500/10 text-red-400 border border-red-500/30'
+                        }`}>
+                          {o.paymentStatus} (Due: ₹{Math.max(0, unpaid).toLocaleString('en-IN')})
+                        </span>
+                      </td>
+
+                      <td className="py-3 text-right space-x-1">
+                        <button
+                          onClick={() => handleOpenEditOrder(o)}
+                          className="p-1.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                          title="Edit Sales Order Invoice"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteOrder(o.id, o.invoiceNumber)}
+                          className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
+                          title="Delete / Rollback Sales Order"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="py-10 text-center text-slate-500 text-xs space-y-2">
+            <Inbox className="w-8 h-8 mx-auto text-slate-600" />
+            <p>No sales order dispatches recorded yet.</p>
+          </div>
+        )}
+      </div>
 
       {/* WHOLESALER PROFILES TABLE */}
       <div className="industrial-card">

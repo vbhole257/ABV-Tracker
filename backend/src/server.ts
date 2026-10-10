@@ -586,12 +586,24 @@ async function initServer() {
   server.delete('/api/v1/wholesalers/:id', async (request) => {
     const { id } = request.params as { id: string };
     await prisma.$transaction(async (tx) => {
+      const orders = await tx.salesOrder.findMany({
+        where: { wholesalerId: id },
+        select: { id: true },
+      });
+      const orderIds = orders.map((o) => o.id);
+
+      if (orderIds.length > 0) {
+        await tx.salesOrderItem.deleteMany({ where: { orderId: { in: orderIds } } });
+        await tx.wholesalerPayment.deleteMany({ where: { salesOrderId: { in: orderIds } } });
+        await tx.salesOrder.deleteMany({ where: { wholesalerId: id } });
+      }
+
       await tx.wholesalerPayment.deleteMany({ where: { wholesalerId: id } });
       await tx.wholesalerLedger.deleteMany({ where: { wholesalerId: id } });
       await tx.crateTransaction.deleteMany({ where: { wholesalerId: id } });
       await tx.wholesaler.delete({ where: { id } });
     });
-    return { success: true, message: 'Wholesaler deleted successfully' };
+    return { success: true, message: 'Wholesaler and all associated records deleted successfully' };
   });
 
   // 6B. SALES ORDERS / DISPATCH INVOICE CRUD APIs
@@ -672,6 +684,125 @@ async function initServer() {
       });
 
       return { success: true, data: order, message: 'Sales Order & Invoice created successfully.' };
+    } catch (err: any) {
+      return reply.status(400).send({ success: false, error: err.message });
+    }
+  });
+
+  server.put('/api/v1/sales/orders/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      wholesalerId: z.string(),
+      invoiceNumber: z.string().optional(),
+      cratesIssued: z.number().default(0),
+      paidAmount: z.number().default(0.0),
+      paymentMode: z.string().default('CASH'),
+      referenceNo: z.string().optional(),
+      items: z.array(
+        z.object({
+          productId: z.string(),
+          casesQuantity: z.number().positive(),
+          pricePerCase: z.number().positive(),
+        })
+      ),
+    });
+
+    const body = schema.parse(request.body);
+    const newTotalAmount = body.items.reduce((sum, item) => sum + item.casesQuantity * item.pricePerCase, 0);
+    const newUnpaidBalance = newTotalAmount - body.paidAmount;
+
+    try {
+      const updatedOrder = await prisma.$transaction(async (tx) => {
+        const existing = await tx.salesOrder.findUnique({
+          where: { id },
+          include: { items: true },
+        });
+
+        if (!existing) {
+          throw new Error('Sales Order not found');
+        }
+
+        const oldUnpaidBalance = existing.totalAmount - existing.paidAmount;
+        const oldCratesIssued = existing.cratesIssued;
+        const oldWholesalerId = existing.wholesalerId;
+
+        // Revert previous balances on old wholesaler
+        if (oldUnpaidBalance > 0 || oldCratesIssued > 0) {
+          await tx.wholesaler.update({
+            where: { id: oldWholesalerId },
+            data: {
+              currentOutstanding: { decrement: oldUnpaidBalance },
+              cratesHeld: { decrement: oldCratesIssued },
+            },
+          });
+        }
+
+        // Revert previous paidAmount on cash account if applicable
+        if (existing.paidAmount > 0) {
+          const account = await tx.account.findFirst();
+          if (account) {
+            await tx.account.update({
+              where: { id: account.id },
+              data: { balance: { decrement: existing.paidAmount } },
+            });
+          }
+        }
+
+        // Delete old items
+        await tx.salesOrderItem.deleteMany({ where: { orderId: id } });
+
+        // Update SalesOrder header and create new items
+        const newPaymentStatus = newUnpaidBalance <= 0 ? 'PAID' : body.paidAmount > 0 ? 'PARTIAL' : 'UNPAID';
+        const updated = await tx.salesOrder.update({
+          where: { id },
+          data: {
+            invoiceNumber: body.invoiceNumber || existing.invoiceNumber,
+            wholesalerId: body.wholesalerId,
+            totalAmount: newTotalAmount,
+            paidAmount: body.paidAmount,
+            paymentStatus: newPaymentStatus,
+            cratesIssued: body.cratesIssued,
+            items: {
+              create: body.items.map((i) => ({
+                productId: i.productId,
+                casesQuantity: i.casesQuantity,
+                pricePerCase: i.pricePerCase,
+                subtotal: i.casesQuantity * i.pricePerCase,
+              })),
+            },
+          },
+          include: {
+            wholesaler: true,
+            items: { include: { product: true } },
+          },
+        });
+
+        // Apply new balances on new wholesaler
+        if (newUnpaidBalance > 0 || body.cratesIssued > 0) {
+          await tx.wholesaler.update({
+            where: { id: body.wholesalerId },
+            data: {
+              currentOutstanding: { increment: Math.max(0, newUnpaidBalance) },
+              cratesHeld: { increment: body.cratesIssued },
+            },
+          });
+        }
+
+        // Apply new paidAmount on cash account
+        if (body.paidAmount > 0) {
+          const account = await tx.account.findFirst();
+          if (account) {
+            await tx.account.update({
+              where: { id: account.id },
+              data: { balance: { increment: body.paidAmount } },
+            });
+          }
+        }
+
+        return updated;
+      });
+
+      return { success: true, data: updatedOrder, message: 'Sales Order updated successfully.' };
     } catch (err: any) {
       return reply.status(400).send({ success: false, error: err.message });
     }
@@ -859,6 +990,7 @@ async function initServer() {
     await prisma.$transaction(async (tx) => {
       await tx.salaryAdvance.deleteMany({ where: { employeeId: id } });
       await tx.payrollRecord.deleteMany({ where: { employeeId: id } });
+      await tx.attendance.deleteMany({ where: { employeeId: id } });
       await tx.employee.delete({ where: { id } });
     });
     return { success: true, message: 'Employee deleted successfully' };
