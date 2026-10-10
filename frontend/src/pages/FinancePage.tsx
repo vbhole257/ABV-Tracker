@@ -18,6 +18,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
   const [annualInterestRate, setAnnualInterestRate] = useState(9.5);
   const [monthlyEmiAmount, setMonthlyEmiAmount] = useState(45000);
   const [tenureMonths, setTenureMonths] = useState(60);
+  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
 
   const [lenders, setLenders] = useState<any[]>([]);
   const [toast, setToast] = useState('');
@@ -55,6 +56,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
           annualInterestRate,
           monthlyEmiAmount,
           tenureMonths,
+          startDate,
         }),
       });
 
@@ -223,9 +225,19 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Principal Sanctioned (₹)</label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Disbursal / Start Date *</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full industrial-input font-mono font-bold text-cyan-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Sanctioned (₹)</label>
               <input
                 type="number"
                 value={principalGranted}
@@ -235,7 +247,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Current Outstanding (₹)</label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Outstanding (₹)</label>
               <input
                 type="number"
                 value={outstandingPrincipal}
@@ -256,7 +268,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1">Monthly EMI Amount (₹)</label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">Monthly EMI (₹)</label>
               <input
                 type="number"
                 value={monthlyEmiAmount}

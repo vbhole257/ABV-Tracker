@@ -626,6 +626,7 @@ async function initServer() {
       paidAmount: z.number().default(0.0),
       paymentMode: z.string().default('CASH'),
       referenceNo: z.string().optional(),
+      dispatchDate: z.string().optional(),
       items: z.array(
         z.object({
           productId: z.string(),
@@ -649,6 +650,7 @@ async function initServer() {
             paidAmount: body.paidAmount,
             paymentStatus: unpaidBalance <= 0 ? 'PAID' : body.paidAmount > 0 ? 'PARTIAL' : 'UNPAID',
             cratesIssued: body.cratesIssued,
+            dispatchDate: body.dispatchDate ? new Date(body.dispatchDate) : new Date(),
             items: {
               create: body.items.map((i) => ({
                 productId: i.productId,
@@ -698,6 +700,7 @@ async function initServer() {
       paidAmount: z.number().default(0.0),
       paymentMode: z.string().default('CASH'),
       referenceNo: z.string().optional(),
+      dispatchDate: z.string().optional(),
       items: z.array(
         z.object({
           productId: z.string(),
@@ -762,6 +765,7 @@ async function initServer() {
             paidAmount: body.paidAmount,
             paymentStatus: newPaymentStatus,
             cratesIssued: body.cratesIssued,
+            dispatchDate: body.dispatchDate ? new Date(body.dispatchDate) : existing.dispatchDate,
             items: {
               create: body.items.map((i) => ({
                 productId: i.productId,
@@ -893,6 +897,31 @@ async function initServer() {
     });
 
     return { success: true, data: lender };
+  });
+
+  server.put('/api/v1/finance/lenders/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      lenderName: z.string().optional(),
+      lenderType: z.string().optional(),
+      accountNumber: z.string().optional(),
+      principalGranted: z.number().optional(),
+      outstandingPrincipal: z.number().optional(),
+      annualInterestRate: z.number().optional(),
+      monthlyEmiAmount: z.number().optional(),
+      tenureMonths: z.number().optional(),
+      startDate: z.string().optional(),
+    });
+    const body = schema.parse(request.body);
+    const data: any = { ...body };
+    if (body.startDate) {
+      data.startDate = new Date(body.startDate);
+    }
+    const updated = await prisma.lender.update({
+      where: { id },
+      data,
+    });
+    return { success: true, data: updated, message: 'Lender account details updated.' };
   });
 
   server.delete('/api/v1/finance/lenders/:id', async (request) => {
@@ -1084,10 +1113,14 @@ async function initServer() {
       employeeId: z.string(),
       periodMonth: z.number().min(1).max(12),
       periodYear: z.number().min(2020),
+      periodStartDate: z.string().optional(),
+      periodEndDate: z.string().optional(),
+      paymentDate: z.string().optional(),
       grossSalary: z.number().nonnegative(),
       advanceDeducted: z.number().nonnegative().default(0),
       paymentMode: z.string(),
       accountId: z.string().optional(),
+      notes: z.string().optional(),
     });
     const body = schema.parse(request.body);
     const netPaid = body.grossSalary - body.advanceDeducted;
@@ -1098,10 +1131,14 @@ async function initServer() {
           employeeId: body.employeeId,
           periodMonth: body.periodMonth,
           periodYear: body.periodYear,
+          periodStartDate: body.periodStartDate ? new Date(body.periodStartDate) : undefined,
+          periodEndDate: body.periodEndDate ? new Date(body.periodEndDate) : undefined,
+          paymentDate: body.paymentDate ? new Date(body.paymentDate) : new Date(),
           grossSalary: body.grossSalary,
           advanceDeducted: body.advanceDeducted,
           netPaid,
           paymentMode: body.paymentMode,
+          notes: body.notes,
         },
       });
 

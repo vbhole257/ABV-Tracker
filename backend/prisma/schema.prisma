@@ -299,17 +299,20 @@ model SalaryAdvance {
 }
 
 model PayrollRecord {
-  id              String   @id @default(uuid())
+  id              String    @id @default(uuid())
   employeeId      String
-  employee        Employee @relation(fields: [employeeId], references: [id])
+  employee        Employee  @relation(fields: [employeeId], references: [id])
   periodMonth     Int
   periodYear      Int
+  periodStartDate DateTime?
+  periodEndDate   DateTime?
   grossSalary     Float
-  advanceDeducted Float    @default(0.0)
+  advanceDeducted Float     @default(0.0)
   netPaid         Float
-  paymentDate     DateTime @default(now())
+  paymentDate     DateTime  @default(now())
   paymentMode     String
-  createdAt       DateTime @default(now())
+  notes           String?
+  createdAt       DateTime  @default(now())
 }
 
 model Account {

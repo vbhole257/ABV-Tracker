@@ -50,6 +50,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const [paidAmount, setPaidAmount] = useState<number>(0);
   const [cratesIssued, setCratesIssued] = useState<number>(0);
   const [refNo, setRefNo] = useState('');
+  const [dispatchDate, setDispatchDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [successToast, setSuccessToast] = useState('');
 
   const loadOrders = async () => {
@@ -108,6 +109,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     setPaidAmount(0);
     setCratesIssued(0);
     setRefNo('');
+    setDispatchDate(new Date().toISOString().slice(0, 10));
   };
 
   // OPEN EDIT ORDER (CRUD UPDATE)
@@ -118,6 +120,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     setCratesIssued(order.cratesIssued || 0);
     setPaidAmount(order.paidAmount || 0);
     setPaymentMode(order.paymentMode || 'CASH');
+    setDispatchDate(order.dispatchDate ? new Date(order.dispatchDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
 
     const newQty: { [key: string]: number } = {};
     const newRates: { [key: string]: number } = {};
@@ -244,6 +247,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
           paidAmount: Number(paidAmount),
           paymentMode,
           referenceNo: refNo,
+          dispatchDate,
           items,
         }),
       });
@@ -552,8 +556,20 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 )}
               </div>
 
-              {/* Payment Details */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-3 border-t border-carbon-700/60">
+              {/* Payment Details & Dispatch Date */}
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 pt-3 border-t border-carbon-700/60">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Dispatch / Invoice Date *
+                  </label>
+                  <input
+                    type="date"
+                    value={dispatchDate}
+                    onChange={(e) => setDispatchDate(e.target.value)}
+                    className="w-full industrial-input font-mono font-bold text-cyan-400"
+                  />
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Plastic Crates Issued

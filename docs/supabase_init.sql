@@ -309,11 +309,14 @@ CREATE TABLE "PayrollRecord" (
     "employeeId" TEXT NOT NULL,
     "periodMonth" INTEGER NOT NULL,
     "periodYear" INTEGER NOT NULL,
+    "periodStartDate" TIMESTAMP(3),
+    "periodEndDate" TIMESTAMP(3),
     "grossSalary" DOUBLE PRECISION NOT NULL,
     "advanceDeducted" DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     "netPaid" DOUBLE PRECISION NOT NULL,
     "paymentDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "paymentMode" TEXT NOT NULL,
+    "notes" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "PayrollRecord_pkey" PRIMARY KEY ("id")

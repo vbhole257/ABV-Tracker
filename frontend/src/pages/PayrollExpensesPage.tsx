@@ -45,6 +45,10 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
   const [payEmpId, setPayEmpId] = useState('');
   const [payMonth, setPayMonth] = useState(new Date().getMonth() + 1);
   const [payYear, setPayYear] = useState(new Date().getFullYear());
+  const [payStartDate, setPayStartDate] = useState('');
+  const [payEndDate, setPayEndDate] = useState('');
+  const [payPaymentDate, setPayPaymentDate] = useState(new Date().toISOString().slice(0, 10));
+  const [payNotes, setPayNotes] = useState('');
   const [payGross, setPayGross] = useState(18000);
   const [payAdvanceDeducted, setPayAdvanceDeducted] = useState(0);
   const [payMode, setPayMode] = useState('CASH');
@@ -386,10 +390,14 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
           employeeId: payEmpId,
           periodMonth: Number(payMonth),
           periodYear: Number(payYear),
+          periodStartDate: payStartDate || undefined,
+          periodEndDate: payEndDate || undefined,
+          paymentDate: payPaymentDate || undefined,
           grossSalary: Number(payGross),
           advanceDeducted: Number(payAdvanceDeducted),
           paymentMode: payMode,
           accountId: payAccountId || undefined,
+          notes: payNotes || undefined,
         }),
       });
 
@@ -1158,6 +1166,51 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
                     value={payYear}
                     onChange={(e) => handlePayYearChange(Number(e.target.value))}
                     className="w-full industrial-input font-mono"
+                  />
+                </div>
+              </div>
+
+              {/* Custom Date Range & Specific Days Options */}
+              <div className="p-3 rounded-lg bg-carbon-900/80 border border-carbon-800 space-y-2">
+                <span className="text-[11px] font-bold text-amber-400 block">
+                  📅 Custom Salary Date Range (Specific Days / Random Period)
+                </span>
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 font-semibold mb-0.5">From Date</label>
+                    <input
+                      type="date"
+                      value={payStartDate}
+                      onChange={(e) => setPayStartDate(e.target.value)}
+                      className="w-full industrial-input text-[11px] font-mono py-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 font-semibold mb-0.5">To Date</label>
+                    <input
+                      type="date"
+                      value={payEndDate}
+                      onChange={(e) => setPayEndDate(e.target.value)}
+                      className="w-full industrial-input text-[11px] font-mono py-1"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 font-semibold mb-0.5">Payment Date *</label>
+                    <input
+                      type="date"
+                      value={payPaymentDate}
+                      onChange={(e) => setPayPaymentDate(e.target.value)}
+                      className="w-full industrial-input text-[11px] font-mono font-bold text-cyan-400 py-1"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <input
+                    type="text"
+                    placeholder="e.g. 1st Oct to 15th Oct Fortnight Settlement / 10 Days Payout"
+                    value={payNotes}
+                    onChange={(e) => setPayNotes(e.target.value)}
+                    className="w-full industrial-input text-[11px] py-1"
                   />
                 </div>
               </div>
