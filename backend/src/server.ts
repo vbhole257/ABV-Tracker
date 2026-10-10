@@ -1173,6 +1173,62 @@ async function initServer() {
     return { success: true, data: payroll, message: 'Payroll processed and logged successfully.' };
   });
 
+  server.put('/api/v1/employees/payrolls/:id', async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      periodMonth: z.number().min(1).max(12).optional(),
+      periodYear: z.number().min(2020).optional(),
+      periodStartDate: z.string().optional(),
+      periodEndDate: z.string().optional(),
+      paymentDate: z.string().optional(),
+      grossSalary: z.number().nonnegative().optional(),
+      advanceDeducted: z.number().nonnegative().optional(),
+      paymentMode: z.string().optional(),
+      notes: z.string().optional(),
+    });
+
+    const body = schema.parse(request.body);
+
+    try {
+      const updated = await prisma.$transaction(async (tx) => {
+        const existing = await tx.payrollRecord.findUnique({ where: { id } });
+        if (!existing) throw new Error('Payroll record not found');
+
+        if (body.advanceDeducted !== undefined && body.advanceDeducted !== existing.advanceDeducted) {
+          const diff = body.advanceDeducted - existing.advanceDeducted;
+          await tx.employee.update({
+            where: { id: existing.employeeId },
+            data: { advanceBalance: { decrement: diff } },
+          });
+        }
+
+        const gross = body.grossSalary !== undefined ? body.grossSalary : existing.grossSalary;
+        const adv = body.advanceDeducted !== undefined ? body.advanceDeducted : existing.advanceDeducted;
+        const netPaid = gross - adv;
+
+        return await tx.payrollRecord.update({
+          where: { id },
+          data: {
+            periodMonth: body.periodMonth ?? existing.periodMonth,
+            periodYear: body.periodYear ?? existing.periodYear,
+            periodStartDate: body.periodStartDate ? new Date(body.periodStartDate) : existing.periodStartDate,
+            periodEndDate: body.periodEndDate ? new Date(body.periodEndDate) : existing.periodEndDate,
+            paymentDate: body.paymentDate ? new Date(body.paymentDate) : existing.paymentDate,
+            grossSalary: gross,
+            advanceDeducted: adv,
+            netPaid,
+            paymentMode: body.paymentMode ?? existing.paymentMode,
+            notes: body.notes !== undefined ? body.notes : existing.notes,
+          },
+        });
+      });
+
+      return { success: true, data: updated, message: 'Payroll record updated successfully.' };
+    } catch (err: any) {
+      return reply.status(400).send({ success: false, error: err.message });
+    }
+  });
+
   server.delete('/api/v1/employees/payrolls/:id', async (request) => {
     const { id } = request.params as { id: string };
 
@@ -1220,6 +1276,26 @@ async function initServer() {
       },
     });
     return { success: true, data: attendance, message: 'Attendance recorded successfully.' };
+  });
+
+  server.put('/api/v1/employees/attendance/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      attDate: z.string().optional(),
+      status: z.string().optional(),
+      overtimeHours: z.number().optional(),
+      notes: z.string().optional(),
+    });
+    const body = schema.parse(request.body);
+    const data: any = { ...body };
+    if (body.attDate) data.attDate = new Date(body.attDate);
+
+    const updated = await prisma.attendance.update({
+      where: { id },
+      data,
+    });
+
+    return { success: true, data: updated, message: 'Attendance record updated.' };
   });
 
   server.delete('/api/v1/employees/attendance/:id', async (request) => {

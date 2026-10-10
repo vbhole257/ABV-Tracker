@@ -27,6 +27,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
 
   // Attendance Modal State
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
+  const [editingAttId, setEditingAttId] = useState<string | null>(null);
   const [attEmpId, setAttEmpId] = useState('');
   const [attDate, setAttDate] = useState(new Date().toISOString().slice(0, 10));
   const [attStatus, setAttStatus] = useState('PRESENT');
@@ -42,6 +43,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
 
   // Payroll Settlement Modal State
   const [showPayrollModal, setShowPayrollModal] = useState(false);
+  const [editingPayId, setEditingPayId] = useState<string | null>(null);
   const [payEmpId, setPayEmpId] = useState('');
   const [payMonth, setPayMonth] = useState(new Date().getMonth() + 1);
   const [payYear, setPayYear] = useState(new Date().getFullYear());
@@ -170,7 +172,27 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
     }
   };
 
-  // ATTENDANCE CRUD: Mark Attendance
+  // ATTENDANCE CRUD: Open Modal (Add / Edit)
+  const handleOpenAttendanceModal = (att?: any) => {
+    if (att) {
+      setEditingAttId(att.id);
+      setAttEmpId(att.employeeId);
+      setAttDate(new Date(att.attDate || att.createdAt).toISOString().slice(0, 10));
+      setAttStatus(att.status || 'PRESENT');
+      setAttOtHours(att.overtimeHours || 0);
+      setAttNotes(att.notes || '');
+    } else {
+      setEditingAttId(null);
+      if (employees.length > 0 && !attEmpId) setAttEmpId(employees[0].id);
+      setAttDate(new Date().toISOString().slice(0, 10));
+      setAttStatus('PRESENT');
+      setAttOtHours(0);
+      setAttNotes('');
+    }
+    setShowAttendanceModal(true);
+  };
+
+  // ATTENDANCE CRUD: Mark / Update Attendance
   const handleMarkAttendance = async () => {
     if (!attEmpId) {
       alert('Please select a staff member');
@@ -178,8 +200,11 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
     }
 
     try {
-      const res = await fetch('/api/v1/employees/attendance', {
-        method: 'POST',
+      const endpoint = editingAttId ? `/api/v1/employees/attendance/${editingAttId}` : '/api/v1/employees/attendance';
+      const method = editingAttId ? 'PUT' : 'POST';
+
+      const res = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           employeeId: attEmpId,
@@ -193,12 +218,12 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
       const json = await res.json();
       if (json.success) {
         const emp = employees.find((e) => e.id === attEmpId);
-        triggerToast(`Attendance marked as ${attStatus} for ${emp?.name || 'Staff'}.`);
+        triggerToast(`Attendance ${editingAttId ? 'updated' : 'marked'} as ${attStatus} for ${emp?.name || 'Staff'}.`);
         setShowAttendanceModal(false);
         loadData();
         onRefresh();
       } else {
-        alert(json.message || 'Error marking attendance');
+        alert(json.message || 'Error saving attendance');
       }
     } catch (e) {
       alert('Network error recording attendance');
@@ -350,32 +375,55 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
     setPayAdvanceDeducted(Math.min(breakdown.recommendedGross, advBal));
   };
 
-  // PAYROLL CRUD: Open Modal
-  const handleOpenPayrollModal = (empId?: string) => {
-    const selected = employees.find((e) => e.id === empId) || employees[0];
-    if (selected) {
-      setPayEmpId(selected.id);
-      updatePayrollForEmployeeAndPeriod(selected.id, payMonth, payYear);
+  // PAYROLL CRUD: Open Modal (Add / Edit)
+  const handleOpenPayrollModal = (param?: any) => {
+    if (param && typeof param === 'object' && param.id) {
+      const pay = param;
+      setEditingPayId(pay.id);
+      setPayEmpId(pay.employeeId);
+      setPayMonth(pay.periodMonth);
+      setPayYear(pay.periodYear);
+      setPayStartDate(pay.periodStartDate ? new Date(pay.periodStartDate).toISOString().slice(0, 10) : '');
+      setPayEndDate(pay.periodEndDate ? new Date(pay.periodEndDate).toISOString().slice(0, 10) : '');
+      setPayPaymentDate(pay.paymentDate ? new Date(pay.paymentDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+      setPayGross(pay.grossSalary || 0);
+      setPayAdvanceDeducted(pay.advanceDeducted || 0);
+      setPayMode(pay.paymentMode || 'CASH');
+      setPayNotes(pay.notes || '');
+    } else {
+      setEditingPayId(null);
+      const empId = typeof param === 'string' ? param : undefined;
+      const selected = employees.find((e) => e.id === empId) || employees[0];
+      if (selected) {
+        setPayEmpId(selected.id);
+        updatePayrollForEmployeeAndPeriod(selected.id, payMonth, payYear);
+      }
+      setPayStartDate('');
+      setPayEndDate('');
+      setPayPaymentDate(new Date().toISOString().slice(0, 10));
+      setPayNotes('');
     }
     setShowPayrollModal(true);
   };
 
   const handlePayEmpChange = (empId: string) => {
     setPayEmpId(empId);
-    updatePayrollForEmployeeAndPeriod(empId, payMonth, payYear);
+    if (!editingPayId) {
+      updatePayrollForEmployeeAndPeriod(empId, payMonth, payYear);
+    }
   };
 
   const handlePayMonthChange = (m: number) => {
     setPayMonth(m);
-    if (payEmpId) updatePayrollForEmployeeAndPeriod(payEmpId, m, payYear);
+    if (payEmpId && !editingPayId) updatePayrollForEmployeeAndPeriod(payEmpId, m, payYear);
   };
 
   const handlePayYearChange = (y: number) => {
     setPayYear(y);
-    if (payEmpId) updatePayrollForEmployeeAndPeriod(payEmpId, payMonth, y);
+    if (payEmpId && !editingPayId) updatePayrollForEmployeeAndPeriod(payEmpId, payMonth, y);
   };
 
-  // PAYROLL CRUD: Process Settlement
+  // PAYROLL CRUD: Process Settlement / Update Payroll
   const handleProcessPayroll = async () => {
     if (!payEmpId) {
       alert('Please select a staff member');
@@ -383,8 +431,11 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
     }
 
     try {
-      const res = await fetch('/api/v1/employees/payrolls', {
-        method: 'POST',
+      const endpoint = editingPayId ? `/api/v1/employees/payrolls/${editingPayId}` : '/api/v1/employees/payrolls';
+      const method = editingPayId ? 'PUT' : 'POST';
+
+      const res = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           employeeId: payEmpId,
@@ -404,7 +455,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
       const json = await res.json();
       if (json.success) {
         const emp = employees.find((e) => e.id === payEmpId);
-        triggerToast(`Payroll settled for ${emp?.name || 'Staff'} (Net Paid: ₹${(payGross - payAdvanceDeducted).toLocaleString()}).`);
+        triggerToast(`Payroll ${editingPayId ? 'updated' : 'settled'} for ${emp?.name || 'Staff'} (Net Paid: ₹${(payGross - payAdvanceDeducted).toLocaleString()}).`);
         setShowPayrollModal(false);
         loadData();
         onRefresh();
@@ -458,7 +509,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setShowAttendanceModal(true)}
+            onClick={() => handleOpenAttendanceModal()}
             className="bg-cyan-500 hover:bg-cyan-400 text-carbon-950 font-bold text-xs px-3.5 py-2.5 rounded-lg shadow-lg transition flex items-center space-x-1.5"
           >
             <CheckSquare className="w-4 h-4" />
@@ -663,7 +714,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
               <span>Daily Staff Attendance & Overtime Log</span>
             </h2>
             <button
-              onClick={() => setShowAttendanceModal(true)}
+              onClick={() => handleOpenAttendanceModal()}
               className="text-xs font-bold text-cyan-400 hover:underline"
             >
               + Mark Daily Attendance
@@ -709,7 +760,14 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
                         {att.overtimeHours > 0 ? `${att.overtimeHours} hrs` : '-'}
                       </td>
                       <td className="py-3 text-slate-400">{att.notes || '-'}</td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 text-right space-x-1">
+                        <button
+                          onClick={() => handleOpenAttendanceModal(att)}
+                          className="p-1.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                          title="Edit Attendance Entry"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           onClick={() => handleDeleteAttendance(att.id)}
                           className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
@@ -839,7 +897,14 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
                       <td className="py-3 text-amber-400">₹{(pay.advanceDeducted || 0).toLocaleString('en-IN')}</td>
                       <td className="py-3 font-bold text-emerald-400">₹{(pay.netPaid || 0).toLocaleString('en-IN')}</td>
                       <td className="py-3 text-slate-400">{pay.paymentMode}</td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 text-right space-x-1">
+                        <button
+                          onClick={() => handleOpenPayrollModal(pay)}
+                          className="p-1.5 rounded bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                          title="Edit Payroll Entry"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
                         <button
                           onClick={() => handleDeletePayroll(pay.id)}
                           className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
@@ -868,7 +933,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
           <div className="industrial-card border-cyan-500/40 w-full max-w-lg space-y-4">
             <h2 className="text-sm font-bold text-cyan-400 border-b border-carbon-700/60 pb-2 flex items-center space-x-2">
               <CheckSquare className="w-4 h-4" />
-              <span>Mark Staff Daily Attendance</span>
+              <span>{editingAttId ? 'Edit Staff Attendance Entry' : 'Mark Staff Daily Attendance'}</span>
             </h2>
 
             <div className="space-y-3 text-xs">
@@ -1127,7 +1192,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
           <div className="industrial-card border-emerald-500/40 w-full max-w-lg space-y-4">
             <h2 className="text-sm font-bold text-emerald-400 border-b border-carbon-700/60 pb-2 flex items-center space-x-2">
               <CreditCard className="w-4 h-4" />
-              <span>Settle Monthly Salary & Deduct Advances</span>
+              <span>{editingPayId ? 'Edit Monthly Payroll Settlement' : 'Settle Monthly Salary & Deduct Advances'}</span>
             </h2>
 
             <div className="space-y-3 text-xs">

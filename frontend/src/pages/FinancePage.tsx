@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Landmark, Check, Wallet, Building2, Inbox, Plus, Trash2 } from 'lucide-react';
+import { Landmark, Check, Wallet, Building2, Inbox, Plus, Trash2, Edit } from 'lucide-react';
 
 interface FinancePageProps {
   summary: any;
@@ -8,6 +8,7 @@ interface FinancePageProps {
 
 export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) => {
   const [showAddLoanModal, setShowAddLoanModal] = useState(false);
+  const [editingLenderId, setEditingLenderId] = useState<string | null>(null);
 
   // Loan Form State
   const [lenderName, setLenderName] = useState('');
@@ -36,44 +37,73 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
     loadLenders();
   }, []);
 
-  // ADD LENDER LOAN (CRUD)
-  const handleAddLoan = async () => {
+  const handleOpenLoanModal = (lender?: any) => {
+    if (lender) {
+      setEditingLenderId(lender.id);
+      setLenderName(lender.lenderName);
+      setLenderType(lender.lenderType || 'BANK');
+      setAccountNumber(lender.accountNumber);
+      setPrincipalGranted(lender.principalGranted || 2500000);
+      setOutstandingPrincipal(lender.outstandingPrincipal || 1500000);
+      setAnnualInterestRate(lender.annualInterestRate || 9.5);
+      setMonthlyEmiAmount(lender.monthlyEmiAmount || 45000);
+      setTenureMonths(lender.tenureMonths || 60);
+      setStartDate(lender.startDate ? new Date(lender.startDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10));
+    } else {
+      setEditingLenderId(null);
+      setLenderName('');
+      setLenderType('BANK');
+      setAccountNumber('');
+      setPrincipalGranted(2500000);
+      setOutstandingPrincipal(1500000);
+      setAnnualInterestRate(9.5);
+      setMonthlyEmiAmount(45000);
+      setTenureMonths(60);
+      setStartDate(new Date().toISOString().slice(0, 10));
+    }
+    setShowAddLoanModal(true);
+  };
+
+  // ADD / EDIT LENDER LOAN (CRUD)
+  const handleSaveLoan = async () => {
     if (!lenderName || !accountNumber) {
       alert('Please enter Lender Name and Loan Account Number');
       return;
     }
 
+    const endpoint = editingLenderId ? `/api/v1/finance/lenders/${editingLenderId}` : '/api/v1/finance/lenders';
+    const method = editingLenderId ? 'PUT' : 'POST';
+
     try {
-      const res = await fetch('/api/v1/finance/lenders', {
-        method: 'POST',
+      const res = await fetch(endpoint, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           lenderName,
           lenderType,
           accountNumber,
-          principalGranted,
-          outstandingPrincipal,
-          annualInterestRate,
-          monthlyEmiAmount,
-          tenureMonths,
+          principalGranted: Number(principalGranted),
+          outstandingPrincipal: Number(outstandingPrincipal),
+          annualInterestRate: Number(annualInterestRate),
+          monthlyEmiAmount: Number(monthlyEmiAmount),
+          tenureMonths: Number(tenureMonths),
           startDate,
         }),
       });
 
       const json = await res.json();
       if (json.success) {
-        setToast(`Lender Loan "${lenderName}" added successfully!`);
+        setToast(`Lender Loan "${lenderName}" ${editingLenderId ? 'updated' : 'added'} successfully!`);
         setShowAddLoanModal(false);
-        setLenderName('');
-        setAccountNumber('');
+        setEditingLenderId(null);
         loadLenders();
         onRefresh();
         setTimeout(() => setToast(''), 4000);
       } else {
-        alert(json.error);
+        alert(json.error || 'Error saving loan profile');
       }
     } catch (e) {
-      alert('Error adding loan profile');
+      alert('Error saving loan profile');
     }
   };
 
@@ -134,7 +164,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
           </p>
         </div>
         <button
-          onClick={() => setShowAddLoanModal(!showAddLoanModal)}
+          onClick={() => handleOpenLoanModal()}
           className="bg-cyan-500 hover:bg-cyan-400 text-carbon-950 font-bold text-xs px-4 py-2.5 rounded-lg shadow-lg transition flex items-center space-x-2 self-start"
         >
           <Plus className="w-4 h-4" />
@@ -180,12 +210,12 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
 
       </div>
 
-      {/* ADD LENDER LOAN MODAL (CRUD) */}
+      {/* ADD / EDIT LENDER LOAN MODAL (CRUD) */}
       {showAddLoanModal && (
         <div className="industrial-card border-cyan-500/40 space-y-4">
           <h2 className="text-sm font-bold text-cyan-400 border-b border-carbon-700/60 pb-2 flex items-center space-x-2">
             <Plus className="w-4 h-4" />
-            <span>Add New Lender / Bank Loan Profile</span>
+            <span>{editingLenderId ? 'Edit Lender / Bank Loan Profile' : 'Add New Lender / Bank Loan Profile'}</span>
           </h2>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -196,7 +226,7 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
                 placeholder="e.g. HDFC Bank Factory Loan"
                 value={lenderName}
                 onChange={(e) => setLenderName(e.target.value)}
-                className="w-full industrial-input"
+                className="w-full industrial-input font-bold"
               />
             </div>
 
@@ -286,10 +316,10 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
               Cancel
             </button>
             <button
-              onClick={handleAddLoan}
+              onClick={handleSaveLoan}
               className="px-5 py-2 rounded bg-cyan-500 hover:bg-cyan-400 text-carbon-950 text-xs font-bold shadow-lg"
             >
-              Save Lender Loan Profile
+              {editingLenderId ? 'Save Loan Changes' : 'Save Lender Loan Profile'}
             </button>
           </div>
         </div>
@@ -313,6 +343,13 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
                   <div>
                     <div className="flex items-center space-x-3">
                       <h3 className="text-base font-bold text-slate-100">{lender.lenderName}</h3>
+                      <button
+                        onClick={() => handleOpenLoanModal(lender)}
+                        className="p-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                        title="Edit Lender Loan Profile"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => handleDeleteLoan(lender.id, lender.lenderName)}
                         className="p-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
