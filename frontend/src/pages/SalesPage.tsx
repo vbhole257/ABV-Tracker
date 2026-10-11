@@ -11,7 +11,12 @@ import {
   Inbox,
   FileText,
   Clock,
-  XCircle
+  XCircle,
+  Loader2,
+  Calendar,
+  Search,
+  Filter,
+  ArrowUpDown
 } from 'lucide-react';
 
 interface SalesPageProps {
@@ -28,6 +33,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   openNewSaleModal = false
 }) => {
   const [orders, setOrders] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const [showNewOrder, setShowNewOrder] = useState(openNewSaleModal);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [editingInvoiceNumber, setEditingInvoiceNumber] = useState<string>('');
@@ -52,6 +58,12 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const [refNo, setRefNo] = useState('');
   const [dispatchDate, setDispatchDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [successToast, setSuccessToast] = useState('');
+
+  // Table Filter & Sorting State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
+  const [sortOrder, setSortOrder] = useState<'NEWEST' | 'OLDEST'>('NEWEST');
 
   const loadOrders = async () => {
     try {
@@ -165,6 +177,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       return;
     }
 
+    setIsLoading(true);
     try {
       const endpoint = editingWholesalerId ? `/api/v1/wholesalers/${editingWholesalerId}` : '/api/v1/wholesalers';
       const method = editingWholesalerId ? 'PUT' : 'POST';
@@ -192,6 +205,8 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       }
     } catch (e) {
       alert('Error saving wholesaler account');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -199,6 +214,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
   const handleDeleteWholesaler = async (id: string, name: string) => {
     if (!confirm(`Are you sure you want to delete wholesaler "${name}"?`)) return;
 
+    setIsLoading(true);
     try {
       const res = await fetch(`/api/v1/wholesalers/${id}`, { method: 'DELETE' });
       const json = await res.json();
@@ -209,6 +225,8 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       }
     } catch (e) {
       alert('Error deleting wholesaler');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -236,6 +254,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
     const endpoint = editingOrderId ? `/api/v1/sales/orders/${editingOrderId}` : '/api/v1/sales/orders';
     const method = editingOrderId ? 'PUT' : 'POST';
 
+    setIsLoading(true);
     try {
       const res = await fetch(endpoint, {
         method,
@@ -265,6 +284,8 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       }
     } catch (e) {
       alert('Error saving sales order');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -285,6 +306,30 @@ export const SalesPage: React.FC<SalesPageProps> = ({
       alert('Error deleting sales order entry');
     }
   };
+
+  const filteredOrders = orders
+    .filter((o) => {
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        const matchInvoice = o.invoiceNumber?.toLowerCase().includes(query);
+        const matchFirm = o.wholesaler?.businessName?.toLowerCase().includes(query);
+        if (!matchInvoice && !matchFirm) return false;
+      }
+      if (filterStartDate) {
+        const orderDate = new Date(o.dispatchDate || o.createdAt).toISOString().slice(0, 10);
+        if (orderDate < filterStartDate) return false;
+      }
+      if (filterEndDate) {
+        const orderDate = new Date(o.dispatchDate || o.createdAt).toISOString().slice(0, 10);
+        if (orderDate > filterEndDate) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      const timeA = new Date(a.dispatchDate || a.createdAt).getTime();
+      const timeB = new Date(b.dispatchDate || b.createdAt).getTime();
+      return sortOrder === 'NEWEST' ? timeB - timeA : timeA - timeB;
+    });
 
   return (
     <div className="space-y-6">
@@ -439,10 +484,10 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
           {wholesalers.length > 0 ? (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Select Wholesaler / Distributor
+                    Select Wholesaler / Distributor *
                   </label>
                   <select
                     value={selectedWholesaler}
@@ -457,15 +502,28 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                   </select>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center space-x-1">
+                    <Calendar className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Dispatch / Sales Date *</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={dispatchDate}
+                    onChange={(e) => setDispatchDate(e.target.value)}
+                    className="w-full industrial-input font-mono font-bold text-cyan-400"
+                  />
+                </div>
+
                 {currentWholesaler && (
                   <div className="p-3 rounded-lg bg-carbon-950 border border-carbon-800 text-xs font-mono flex items-center justify-between">
                     <div>
-                      <span className="text-slate-400 block">Credit Limit: ₹{(currentWholesaler.creditLimit || 0).toLocaleString('en-IN')}</span>
-                      <span className="text-cyan-400 font-bold block">Current Balance: ₹{(currentWholesaler.currentOutstanding || 0).toLocaleString('en-IN')}</span>
+                      <span className="text-slate-400 block text-[11px]">Credit Limit: ₹{(currentWholesaler.creditLimit || 0).toLocaleString('en-IN')}</span>
+                      <span className="text-cyan-400 font-bold block">Outstanding: ₹{(currentWholesaler.currentOutstanding || 0).toLocaleString('en-IN')}</span>
                     </div>
                     <div className="text-right">
                       <span className="text-amber-400 font-bold block">{currentWholesaler.cratesHeld || 0} Crates</span>
-                      <span className="text-[10px] text-slate-500">Currently Held Outside</span>
+                      <span className="text-[10px] text-slate-500">Held Outside</span>
                     </div>
                   </div>
                 )}
@@ -591,11 +649,10 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                     onChange={(e) => setPaymentMode(e.target.value)}
                     className="w-full industrial-input"
                   >
-                    <option value="CASH">CASH Counter</option>
-                    <option value="UPI">UPI Instant QR</option>
-                    <option value="NEFT_RTGS">NEFT / RTGS Bank</option>
-                    <option value="CHEQUE">Cheque Clearance</option>
-                    <option value="PDC">PDC (Post-Dated Cheque)</option>
+                    <option value="CASH">💵 Cash (Factory Cash Box)</option>
+                    <option value="UPI">📱 UPI (Online Bank Account)</option>
+                    <option value="NEFT_RTGS">🏦 NEFT / RTGS (Online Bank Account)</option>
+                    <option value="CHEQUE">📑 Cheque (Online Bank Account)</option>
                   </select>
                 </div>
 
@@ -623,13 +680,15 @@ export const SalesPage: React.FC<SalesPageProps> = ({
 
                 <button
                   onClick={handleSaveOrder}
-                  className={`w-full sm:w-auto font-bold px-6 py-3 rounded-lg shadow-lg text-sm transition ${
+                  disabled={isLoading}
+                  className={`w-full sm:w-auto font-bold px-6 py-3 rounded-lg shadow-lg text-sm transition flex items-center justify-center space-x-2 ${
                     editingOrderId 
                       ? 'bg-amber-500 hover:bg-amber-400 text-carbon-950 shadow-amber-500/20' 
                       : 'bg-emerald-500 hover:bg-emerald-400 text-carbon-950 shadow-emerald-500/20'
-                  }`}
+                  } ${isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  {editingOrderId ? 'Save Sales Order Changes' : 'Confirm & Generate Invoice'}
+                  {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>{editingOrderId ? 'Save Sales Order Changes' : 'Confirm & Generate Invoice'}</span>
                 </button>
               </div>
             </>
@@ -639,17 +698,74 @@ export const SalesPage: React.FC<SalesPageProps> = ({
         </div>
       )}
 
-      {/* DISPATCHED SALES ORDERS HISTORY TABLE (CRUD) */}
+      {/* DISPATCHED SALES ORDERS HISTORY TABLE (CRUD & DATE SEARCH) */}
       <div className="industrial-card">
         <h2 className="text-sm font-bold text-slate-100 flex items-center justify-between border-b border-carbon-700/60 pb-3">
           <span className="flex items-center space-x-2">
             <FileText className="w-4 h-4 text-emerald-400" />
-            <span>Dispatched Sales Orders Ledger (CRUD)</span>
+            <span>Dispatched Sales Orders Ledger (CRUD & Date Range Search)</span>
           </span>
           <span className="text-xs text-slate-400 font-mono">
-            {orders.length} Invoices Logged
+            {filteredOrders.length} / {orders.length} Invoices Filtered
           </span>
         </h2>
+
+        {/* Date Filter & Search Bar */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-3 pb-3 border-b border-carbon-800 text-xs">
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+            <input
+              type="text"
+              placeholder="Search Wholesaler / Invoice #"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full industrial-input pl-8 py-1.5 text-xs"
+            />
+          </div>
+
+          <div className="flex items-center space-x-1.5">
+            <span className="text-slate-400 font-mono text-[11px] shrink-0">From Date:</span>
+            <input
+              type="date"
+              value={filterStartDate}
+              onChange={(e) => setFilterStartDate(e.target.value)}
+              className="w-full industrial-input py-1 text-xs font-mono"
+            />
+          </div>
+
+          <div className="flex items-center space-x-1.5">
+            <span className="text-slate-400 font-mono text-[11px] shrink-0">To Date:</span>
+            <input
+              type="date"
+              value={filterEndDate}
+              onChange={(e) => setFilterEndDate(e.target.value)}
+              className="w-full industrial-input py-1 text-xs font-mono"
+            />
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as any)}
+              className="w-full industrial-input py-1 text-xs font-mono font-bold text-cyan-400"
+            >
+              <option value="NEWEST">📅 Sort: Newest Date First</option>
+              <option value="OLDEST">📅 Sort: Oldest Date First</option>
+            </select>
+            {(searchQuery || filterStartDate || filterEndDate) && (
+              <button
+                onClick={() => {
+                  setSearchQuery('');
+                  setFilterStartDate('');
+                  setFilterEndDate('');
+                }}
+                className="text-[10px] text-slate-400 hover:text-slate-200 underline shrink-0"
+              >
+                Reset
+              </button>
+            )}
+          </div>
+        </div>
 
         {orders.length > 0 ? (
           <div className="overflow-x-auto mt-4">
@@ -666,7 +782,7 @@ export const SalesPage: React.FC<SalesPageProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-carbon-800/60 text-slate-200">
-                {orders.map((o) => {
+                {filteredOrders.map((o) => {
                   const unpaid = o.totalAmount - (o.paidAmount || 0);
                   return (
                     <tr key={o.id} className="hover:bg-carbon-800/40">

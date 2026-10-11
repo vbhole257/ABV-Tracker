@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Wallet, 
   Building2, 
@@ -8,7 +8,10 @@ import {
   CheckCircle2, 
   ArrowUpRight, 
   Clock, 
-  Inbox 
+  Inbox,
+  ShoppingBag,
+  Filter,
+  DollarSign
 } from 'lucide-react';
 
 interface DashboardPageProps {
@@ -23,10 +26,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   onOpenNewSale 
 }) => {
   const pulse = summary?.financialPulse || {};
+  const turnover = summary?.businessTurnover || {};
+  const monthlyList = summary?.monthlyBreakdown || [];
   const today = summary?.todaySummary || {};
   const target = summary?.targetMeter;
   const alerts = summary?.inventoryAlerts || {};
   const emis = summary?.upcomingEmis || [];
+
+  const [selectedMonthKey, setSelectedMonthKey] = useState<string>('ALL');
+
+  const selectedMonthData = selectedMonthKey === 'ALL' 
+    ? null 
+    : monthlyList.find((m: any) => m.monthKey === selectedMonthKey);
 
   return (
     <div className="space-y-6">
@@ -49,21 +60,93 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
       </div>
 
+      {/* BUSINESS TURNOVER & MONTHLY DATA SELECTOR CARD */}
+      <div className="industrial-card bg-gradient-to-r from-carbon-900 to-carbon-950 border border-cyan-500/40 p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-carbon-800 pb-3">
+          <div>
+            <h2 className="text-base font-bold text-slate-100 flex items-center space-x-2">
+              <ShoppingBag className="w-5 h-5 text-cyan-400" />
+              <span>Business Turnover & Sales Volume Summary</span>
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {selectedMonthKey === 'ALL' 
+                ? 'Lifetime business turnover and total cases sold (starting from ₹0.00 base)' 
+                : `Monthly stats for ${selectedMonthData?.monthName || selectedMonthKey}`}
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <Filter className="w-4 h-4 text-cyan-400" />
+            <select
+              value={selectedMonthKey}
+              onChange={(e) => setSelectedMonthKey(e.target.value)}
+              className="industrial-input py-1.5 px-3 text-xs font-mono font-bold text-cyan-400 bg-carbon-950"
+            >
+              <option value="ALL">📅 View: All Time (Lifetime Turnover)</option>
+              {monthlyList.map((m: any) => (
+                <option key={m.monthKey} value={m.monthKey}>
+                  📅 {m.monthName} ({m.casesSold} Peti - ₹{m.turnoverRevenue.toLocaleString('en-IN')})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* 4 TURNOVER STAT METRICS */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1 font-mono">
+          
+          <div className="p-3.5 rounded-lg bg-carbon-950 border border-cyan-500/30 space-y-1">
+            <span className="text-xs text-slate-400 block font-sans font-semibold">Total Cases Sold:</span>
+            <strong className="text-2xl font-extrabold text-cyan-400 block">
+              {selectedMonthData ? (selectedMonthData.casesSold || 0).toLocaleString() : (turnover.totalCasesSold || 0).toLocaleString()} <span className="text-xs text-slate-400 font-sans">Peti</span>
+            </strong>
+            <span className="text-[10px] text-slate-500 block font-sans">Total cold drink PET cases dispatched</span>
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-carbon-950 border border-emerald-500/30 space-y-1">
+            <span className="text-xs text-slate-400 block font-sans font-semibold">Total Business Turnover:</span>
+            <strong className="text-2xl font-extrabold text-emerald-400 block">
+              ₹ {selectedMonthData ? (selectedMonthData.turnoverRevenue || 0).toLocaleString('en-IN') : (turnover.totalTurnoverRevenue || 0).toLocaleString('en-IN')}
+            </strong>
+            <span className="text-[10px] text-slate-500 block font-sans">Gross invoiced sales revenue</span>
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-carbon-950 border border-emerald-500/20 space-y-1">
+            <span className="text-xs text-slate-400 block font-sans font-semibold">Cash Collections:</span>
+            <strong className="text-xl font-bold text-slate-100 block">
+              ₹ {selectedMonthData ? (selectedMonthData.cashCollected || 0).toLocaleString('en-IN') : (turnover.totalPaidCash || 0).toLocaleString('en-IN')}
+            </strong>
+            <span className="text-[10px] text-slate-500 block font-sans">Received into Factory Cash Box</span>
+          </div>
+
+          <div className="p-3.5 rounded-lg bg-carbon-950 border border-cyan-500/20 space-y-1">
+            <span className="text-xs text-slate-400 block font-sans font-semibold">Online / Bank Collections:</span>
+            <strong className="text-xl font-bold text-slate-100 block">
+              ₹ {selectedMonthData ? (selectedMonthData.onlineCollected || 0).toLocaleString('en-IN') : (turnover.totalPaidBank || 0).toLocaleString('en-IN')}
+            </strong>
+            <span className="text-[10px] text-slate-500 block font-sans">Received via UPI / NEFT / Online</span>
+          </div>
+
+        </div>
+      </div>
+
       {/* 2. 4 FINANCIAL CARDS GRID */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         
         {/* Card 1: Available Cash & Bank */}
-        <div className="industrial-card relative overflow-hidden">
+        <div className="industrial-card relative overflow-hidden group">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
-            <span>AVAILABLE LIQUIDITY</span>
+            <span className="flex items-center space-x-1" title="Formula: Cash Box + Bank Current Account">
+              <span>AVAILABLE LIQUIDITY</span>
+            </span>
             <Wallet className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="mt-2 text-2xl font-extrabold text-slate-50 font-mono">
             ₹ {(pulse.totalAvailableBalance || 0).toLocaleString('en-IN')}
           </div>
           <div className="mt-3 pt-3 border-t border-carbon-700/60 flex items-center justify-between text-xs font-mono text-slate-400">
-            <span>Cash: <strong className="text-emerald-400">₹{(pulse.totalCash || 0).toLocaleString('en-IN')}</strong></span>
-            <span>Bank: <strong className="text-cyan-400">₹{(pulse.totalBank || 0).toLocaleString('en-IN')}</strong></span>
+            <span>Cash Box: <strong className="text-emerald-400">₹{(pulse.totalCash || 0).toLocaleString('en-IN')}</strong></span>
+            <span>Online Bank: <strong className="text-cyan-400">₹{(pulse.totalBank || 0).toLocaleString('en-IN')}</strong></span>
           </div>
         </div>
 
@@ -87,10 +170,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
         </div>
 
-        {/* Card 3: Total Loan Debt */}
+        {/* Card 3: Total Loan Debt (Record Only) */}
         <div className="industrial-card">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
-            <span>OUTSTANDING LOAN DEBT</span>
+            <span title="Lender loan balances kept strictly for record keeping">LOAN DEBT (RECORD ONLY)</span>
             <Building2 className="w-4 h-4 text-amber-400" />
           </div>
           <div className="mt-2 text-2xl font-extrabold text-amber-400 font-mono">
@@ -102,17 +185,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
         </div>
 
-        {/* Card 4: Upcoming 30-Day EMI */}
+        {/* Card 4: Upcoming 30-Day EMI (Record Only) */}
         <div className="industrial-card">
           <div className="flex items-center justify-between text-slate-400 text-xs font-semibold">
-            <span>30-DAY EMI OBLIGATION</span>
+            <span title="Monthly EMI records">EMI RECORD (30-DAY)</span>
             <Clock className="w-4 h-4 text-red-400" />
           </div>
           <div className="mt-2 text-2xl font-extrabold text-red-400 font-mono">
             ₹ {(pulse.emiDue30Days || 0).toLocaleString('en-IN')}
           </div>
           <div className="mt-3 pt-3 border-t border-carbon-700/60 flex items-center justify-between text-xs text-slate-400">
-            <span>Upcoming Due Dates</span>
+            <span>Record Ledger</span>
             <button 
               onClick={() => onNavigateTab('finance')}
               className="text-red-400 hover:underline font-semibold"

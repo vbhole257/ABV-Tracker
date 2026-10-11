@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Truck, Plus, Trash2, Edit, Building, Inbox, Check, Calendar, FileText, DollarSign } from 'lucide-react';
+import { Package, Truck, Plus, Trash2, Edit, Building, Inbox, Check, Calendar, FileText, DollarSign, Loader2, AlertTriangle, Filter } from 'lucide-react';
 
 interface InventoryPageProps {
   onRefresh: () => void;
@@ -7,6 +7,8 @@ interface InventoryPageProps {
 
 export const InventoryPage: React.FC<InventoryPageProps> = ({ onRefresh }) => {
   const [activeTab, setActiveTab] = useState<'PURCHASES' | 'RAW_MATERIALS' | 'SUPPLIERS'>('PURCHASES');
+  const [isLoading, setIsLoading] = useState(false);
+  const [purchaseStatusFilter, setPurchaseStatusFilter] = useState<'ALL' | 'UNPAID' | 'PAID'>('ALL');
 
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
@@ -420,6 +422,47 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ onRefresh }) => {
             </div>
           </div>
 
+          {/* Status Filter buttons: ALL | UNPAID / PARTIAL | FULLY PAID */}
+          <div className="flex items-center justify-between mt-3 pb-3 border-b border-carbon-800 text-xs">
+            <div className="flex items-center space-x-2">
+              <span className="text-slate-400 font-bold flex items-center space-x-1">
+                <Filter className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Filter Payment Status:</span>
+              </span>
+              <button
+                onClick={() => setPurchaseStatusFilter('ALL')}
+                className={`px-2.5 py-1 rounded font-bold text-[11px] ${
+                  purchaseStatusFilter === 'ALL'
+                    ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                    : 'bg-carbon-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                All Purchases ({purchases.length})
+              </button>
+              <button
+                onClick={() => setPurchaseStatusFilter('UNPAID')}
+                className={`px-2.5 py-1 rounded font-bold text-[11px] flex items-center space-x-1 ${
+                  purchaseStatusFilter === 'UNPAID'
+                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                    : 'bg-carbon-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <AlertTriangle className="w-3 h-3 text-amber-400" />
+                <span>⚠️ Unpaid / Partial ({purchases.filter((p) => p.paidAmount < p.totalAmount).length})</span>
+              </button>
+              <button
+                onClick={() => setPurchaseStatusFilter('PAID')}
+                className={`px-2.5 py-1 rounded font-bold text-[11px] ${
+                  purchaseStatusFilter === 'PAID'
+                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                    : 'bg-carbon-800 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                ✓ Fully Paid ({purchases.filter((p) => p.paidAmount >= p.totalAmount).length})
+              </button>
+            </div>
+          </div>
+
           {purchases.length > 0 ? (
             <div className="overflow-x-auto mt-4">
               <table className="w-full text-left text-xs font-mono">
@@ -431,46 +474,84 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ onRefresh }) => {
                     <th className="pb-3">PURCHASED MATERIAL</th>
                     <th className="pb-3">TOTAL VALUE</th>
                     <th className="pb-3">PAID AMOUNT</th>
+                    <th className="pb-3">PAYMENT STATUS</th>
                     <th className="pb-3 text-right">ACTIONS</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-carbon-800/60 text-slate-200">
-                  {purchases.map((p) => {
-                    const item = p.items?.[0];
-                    const matName = item?.material?.name || 'Raw Material';
-                    const matUnit = item?.material?.unit || 'Units';
-                    const matQty = item?.quantity || 0;
-                    return (
-                      <tr key={p.id} className="hover:bg-carbon-800/40">
-                        <td className="py-3 text-slate-300">
-                          {new Date(p.purchaseDate || p.createdAt).toLocaleDateString()} {new Date(p.purchaseDate || p.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </td>
-                        <td className="py-3 font-bold text-amber-400">{p.invoiceNumber}</td>
-                        <td className="py-3 font-bold text-cyan-400">{p.supplier?.name || 'Supplier'}</td>
-                        <td className="py-3 text-slate-100 font-bold">
-                          {matName} — <span className="text-emerald-400">{matQty} {matUnit}</span> @ ₹{item?.rate || 0}
-                        </td>
-                        <td className="py-3 font-bold text-slate-100">₹{(p.totalAmount || 0).toLocaleString('en-IN')}</td>
-                        <td className="py-3 text-emerald-400">₹{(p.paidAmount || 0).toLocaleString('en-IN')}</td>
-                        <td className="py-3 text-right space-x-1">
-                          <button
-                            onClick={() => handleOpenEditPurchase(p)}
-                            className="p-1.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
-                            title="Edit Purchase Invoice"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeletePurchase(p.id, p.invoiceNumber)}
-                            className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
-                            title="Delete / Reverse Purchase"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {purchases
+                    .filter((p) => {
+                      if (purchaseStatusFilter === 'UNPAID') return p.paidAmount < p.totalAmount;
+                      if (purchaseStatusFilter === 'PAID') return p.paidAmount >= p.totalAmount;
+                      return true;
+                    })
+                    .map((p) => {
+                      const item = p.items?.[0];
+                      const matName = item?.material?.name || 'Raw Material';
+                      const matUnit = item?.material?.unit || 'Units';
+                      const matQty = item?.quantity || 0;
+                      const unpaid = (p.totalAmount || 0) - (p.paidAmount || 0);
+                      const isFullyPaid = p.paidAmount >= p.totalAmount;
+                      const isUnpaid = p.paidAmount === 0;
+                      const isPartial = p.paidAmount > 0 && p.paidAmount < p.totalAmount;
+
+                      return (
+                        <tr 
+                          key={p.id} 
+                          className={`hover:bg-carbon-800/40 ${
+                            isUnpaid 
+                              ? 'bg-red-500/10 border-l-4 border-l-red-500' 
+                              : isPartial 
+                              ? 'bg-amber-500/10 border-l-4 border-l-amber-500' 
+                              : ''
+                          }`}
+                        >
+                          <td className="py-3 text-slate-300">
+                            {new Date(p.purchaseDate || p.createdAt).toLocaleDateString()}
+                          </td>
+                          <td className="py-3 font-bold text-amber-400">{p.invoiceNumber}</td>
+                          <td className="py-3 font-bold text-cyan-400">{p.supplier?.name || 'Supplier'}</td>
+                          <td className="py-3 text-slate-100 font-bold">
+                            {matName} — <span className="text-emerald-400">{matQty} {matUnit}</span> @ ₹{item?.rate || 0}
+                          </td>
+                          <td className="py-3 font-bold text-slate-100">₹{(p.totalAmount || 0).toLocaleString('en-IN')}</td>
+                          <td className="py-3 text-emerald-400 font-bold">₹{(p.paidAmount || 0).toLocaleString('en-IN')}</td>
+                          <td className="py-3">
+                            {isFullyPaid && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                ✓ FULLY PAID
+                              </span>
+                            )}
+                            {isPartial && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40 block">
+                                ⚠️ PARTIAL (Due: ₹{unpaid.toLocaleString()})
+                              </span>
+                            )}
+                            {isUnpaid && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400 border border-red-500/40 block">
+                                🚨 UNPAID (Due: ₹{unpaid.toLocaleString()})
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-3 text-right space-x-1">
+                            <button
+                              onClick={() => handleOpenEditPurchase(p)}
+                              className="p-1.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 border border-cyan-500/30"
+                              title="Edit Purchase Invoice"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeletePurchase(p.id, p.invoiceNumber)}
+                              className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
+                              title="Delete / Reverse Purchase"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </div>

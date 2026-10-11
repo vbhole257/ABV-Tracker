@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Landmark, Check, Wallet, Building2, Inbox, Plus, Trash2, Edit } from 'lucide-react';
+import { Landmark, Check, Wallet, Building2, Inbox, Plus, Trash2, Edit, Clock, ArrowUpDown, Search, Filter, HelpCircle, Info, Loader2, DollarSign } from 'lucide-react';
 
 interface FinancePageProps {
   summary: any;
@@ -9,6 +9,7 @@ interface FinancePageProps {
 export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) => {
   const [showAddLoanModal, setShowAddLoanModal] = useState(false);
   const [editingLenderId, setEditingLenderId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Loan Form State
   const [lenderName, setLenderName] = useState('');
@@ -22,6 +23,11 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
 
   const [lenders, setLenders] = useState<any[]>([]);
+  const [pendingDuesData, setPendingDuesData] = useState<any>(null);
+  const [duesFilter, setDuesFilter] = useState<'ALL' | 'RECEIVABLE' | 'PAYABLE' | 'EMI_DUE'>('ALL');
+  const [duesSort, setDuesSort] = useState<'NEWEST' | 'OLDEST'>('NEWEST');
+  const [duesSearch, setDuesSearch] = useState('');
+  const [showLiquidityExplanation, setShowLiquidityExplanation] = useState(true);
   const [toast, setToast] = useState('');
 
   const pulse = summary?.financialPulse || {};
@@ -33,8 +39,16 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
       .catch(() => {});
   };
 
+  const loadPendingDues = () => {
+    fetch('/api/v1/finance/pending-dues')
+      .then((res) => res.json())
+      .then((json) => json.success && setPendingDuesData(json.data))
+      .catch(() => {});
+  };
+
   useEffect(() => {
     loadLenders();
+    loadPendingDues();
   }, []);
 
   const handleOpenLoanModal = (lender?: any) => {
@@ -188,26 +202,214 @@ export const FinancePage: React.FC<FinancePageProps> = ({ summary, onRefresh }) 
 
         <div className="industrial-card border-cyan-500/30">
           <div className="flex items-center justify-between text-xs text-slate-400 font-semibold">
-            <span>HDFC CURRENT BANK</span>
+            <span>ONLINE BANK ACCOUNT</span>
             <Building2 className="w-4 h-4 text-cyan-400" />
           </div>
           <div className="mt-2 text-2xl font-extrabold text-cyan-400 font-mono">
             ₹ {(pulse.totalBank || 0).toLocaleString('en-IN')}
           </div>
-          <span className="text-[11px] text-slate-400 mt-1 block">Current Bank Account</span>
+          <span className="text-[11px] text-slate-400 mt-1 block">UPI / NEFT / Online Banking Account</span>
         </div>
 
         <div className="industrial-card border-amber-500/30">
           <div className="flex items-center justify-between text-xs text-slate-400 font-semibold">
-            <span>TOTAL LOAN OUTSTANDING</span>
+            <span>TOTAL LOAN DEBT (RECORD ONLY)</span>
             <Landmark className="w-4 h-4 text-amber-400" />
           </div>
           <div className="mt-2 text-2xl font-extrabold text-amber-400 font-mono">
             ₹ {(pulse.totalLoanOutstanding || 0).toLocaleString('en-IN')}
           </div>
-          <span className="text-[11px] text-slate-400 mt-1 block">Monthly EMI: ₹{(pulse.emiDue30Days || 0).toLocaleString('en-IN')}</span>
+          <span className="text-[11px] text-slate-400 mt-1 block">Monthly EMI: ₹{(pulse.emiDue30Days || 0).toLocaleString('en-IN')} <span className="text-amber-500/80 font-mono text-[10px]">(Excluded from Rotation)</span></span>
+        </div>
+      </div>
+
+      {/* AVAILABLE LIQUIDITY EXPLANATION CARD */}
+      <div className="p-4 rounded-xl bg-carbon-900 border border-cyan-500/30 space-y-2 text-xs">
+        <div className="flex items-center justify-between text-cyan-400 font-bold border-b border-carbon-800 pb-2">
+          <span className="flex items-center space-x-2">
+            <Info className="w-4 h-4 text-cyan-400" />
+            <span>⚡ How Available Liquidity & Buying Rotation is Calculated</span>
+          </span>
+          <span className="font-mono text-[11px] text-slate-400">
+            Formula: Cash Box + Online Bank Balance
+          </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-slate-300 pt-1 font-mono">
+          <div className="p-3 rounded bg-carbon-950 border border-carbon-800">
+            <span className="text-[11px] text-slate-400 block font-sans font-semibold">1. Factory Cash Box:</span>
+            <strong className="text-emerald-400 text-sm">₹{(pulse.totalCash || 0).toLocaleString('en-IN')}</strong>
+            <span className="text-[10px] text-slate-500 block font-sans">Physical cash available in factory counter</span>
+          </div>
+          <div className="p-3 rounded bg-carbon-950 border border-carbon-800">
+            <span className="text-[11px] text-slate-400 block font-sans font-semibold">2. Online Bank Account:</span>
+            <strong className="text-cyan-400 text-sm">₹{(pulse.totalBank || 0).toLocaleString('en-IN')}</strong>
+            <span className="text-[10px] text-slate-500 block font-sans">UPI / NEFT / Instant online bank funds</span>
+          </div>
+          <div className="p-3 rounded bg-carbon-950 border border-cyan-500/40">
+            <span className="text-[11px] text-cyan-400 block font-sans font-semibold">3. Net Available Liquidity:</span>
+            <strong className="text-slate-100 text-base">₹{((pulse.totalCash || 0) + (pulse.totalBank || 0)).toLocaleString('en-IN')}</strong>
+            <span className="text-[10px] text-slate-400 block font-sans">Instant cash available to pay expenses/raw materials</span>
+          </div>
+        </div>
+        <div className="text-[11px] text-slate-400 font-sans pt-1 leading-relaxed">
+          💡 <strong>Operational Rotation / Buying Power:</strong> (Liquidity + Receivables ₹{(pulse.customerReceivables || 0).toLocaleString()}) - (Supplier Payables ₹{(pulse.supplierPayables || 0).toLocaleString()}).<br/>
+          📌 <em>Note: Loan amounts & EMIs are kept strictly as internal reference records and are <strong>NOT deducted</strong> from daily buying or rotation.</em>
+        </div>
+      </div>
+
+      {/* MASTER PENDING AMOUNTS & DUES TRACKER (SORTABLE BY DATE) */}
+      <div className="industrial-card border-amber-500/40 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-carbon-700/60 pb-3">
+          <div>
+            <h2 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+              <Clock className="w-4 h-4 text-amber-400" />
+              <span>Pending Amounts & Dues Tracker (Sorted by Date)</span>
+            </h2>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              All outstanding Customer Receivables, Supplier Payables, and EMI commitments in one place
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={duesSort}
+              onChange={(e) => setDuesSort(e.target.value as any)}
+              className="industrial-input py-1 text-xs font-mono font-bold text-amber-400"
+            >
+              <option value="NEWEST">📅 Sort: Newest / Due Soonest First</option>
+              <option value="OLDEST">📅 Sort: Oldest First</option>
+            </select>
+          </div>
         </div>
 
+        {/* Filter Buttons Bar */}
+        <div className="flex items-center space-x-2 overflow-x-auto text-xs pb-1">
+          <button
+            onClick={() => setDuesFilter('ALL')}
+            className={`px-3 py-1 rounded font-bold whitespace-nowrap ${
+              duesFilter === 'ALL'
+                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                : 'bg-carbon-800 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            All Pending Dues ({pendingDuesData?.summary?.totalItemsCount || 0})
+          </button>
+          <button
+            onClick={() => setDuesFilter('RECEIVABLE')}
+            className={`px-3 py-1 rounded font-bold whitespace-nowrap ${
+              duesFilter === 'RECEIVABLE'
+                ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/40'
+                : 'bg-carbon-800 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            📈 Customer Receivables (₹{(pendingDuesData?.summary?.totalPendingReceivables || 0).toLocaleString()})
+          </button>
+          <button
+            onClick={() => setDuesFilter('PAYABLE')}
+            className={`px-3 py-1 rounded font-bold whitespace-nowrap ${
+              duesFilter === 'PAYABLE'
+                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                : 'bg-carbon-800 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            📉 Supplier Payables (₹{(pendingDuesData?.summary?.totalPendingPayables || 0).toLocaleString()})
+          </button>
+          <button
+            onClick={() => setDuesFilter('EMI_DUE')}
+            className={`px-3 py-1 rounded font-bold whitespace-nowrap ${
+              duesFilter === 'EMI_DUE'
+                ? 'bg-red-500/20 text-red-400 border border-red-500/40'
+                : 'bg-carbon-800 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            🏦 Loan EMI Records (For Info Only) (₹{(pendingDuesData?.summary?.totalUpcomingEmis || 0).toLocaleString()})
+          </button>
+        </div>
+
+        {/* Pending Items Table */}
+        {pendingDuesData?.items && pendingDuesData.items.length > 0 ? (
+          <div className="overflow-x-auto mt-2">
+            <table className="w-full text-left text-xs font-mono">
+              <thead>
+                <tr className="text-slate-400 border-b border-carbon-800">
+                  <th className="pb-3">TYPE</th>
+                  <th className="pb-3">PARTY / LENDER</th>
+                  <th className="pb-3">REF / INVOICE #</th>
+                  <th className="pb-3">DATE / DUE DATE</th>
+                  <th className="pb-3">TOTAL AMOUNT</th>
+                  <th className="pb-3">PAID AMOUNT</th>
+                  <th className="pb-3">PENDING DUE</th>
+                  <th className="pb-3">CONTACT</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-carbon-800/60 text-slate-200">
+                {pendingDuesData.items
+                  .filter((item: any) => {
+                    if (duesFilter !== 'ALL' && item.type !== duesFilter) return false;
+                    if (duesSearch) {
+                      const q = duesSearch.toLowerCase();
+                      const matchTitle = item.title?.toLowerCase().includes(q);
+                      const matchRef = item.referenceNo?.toLowerCase().includes(q);
+                      if (!matchTitle && !matchRef) return false;
+                    }
+                    return true;
+                  })
+                  .sort((a: any, b: any) => {
+                    const timeA = new Date(a.date).getTime();
+                    const timeB = new Date(b.date).getTime();
+                    return duesSort === 'NEWEST' ? timeB - timeA : timeA - timeB;
+                  })
+                  .map((item: any) => (
+                    <tr 
+                      key={item.id} 
+                      className={`hover:bg-carbon-800/40 ${
+                        item.type === 'RECEIVABLE' 
+                          ? 'border-l-2 border-l-cyan-400' 
+                          : item.type === 'PAYABLE' 
+                          ? 'border-l-2 border-l-rose-400' 
+                          : 'border-l-2 border-l-red-500'
+                      }`}
+                    >
+                      <td className="py-3">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          item.type === 'RECEIVABLE'
+                            ? 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'
+                            : item.type === 'PAYABLE'
+                            ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                            : 'bg-red-500/20 text-red-400 border border-red-500/30'
+                        }`}>
+                          {item.type === 'RECEIVABLE' ? 'RECEIVABLE' : item.type === 'PAYABLE' ? 'PAYABLE' : 'EMI DUE'}
+                        </span>
+                      </td>
+
+                      <td className="py-3 font-bold text-slate-100">{item.title}</td>
+
+                      <td className="py-3 font-bold text-amber-400">{item.referenceNo}</td>
+
+                      <td className="py-3 text-slate-300">
+                        {new Date(item.date).toLocaleDateString()}
+                      </td>
+
+                      <td className="py-3 text-slate-400">₹{(item.totalAmount || 0).toLocaleString('en-IN')}</td>
+
+                      <td className="py-3 text-emerald-400 font-bold">₹{(item.paidAmount || 0).toLocaleString('en-IN')}</td>
+
+                      <td className="py-3 font-extrabold text-sm text-amber-400">
+                        ₹{(item.pendingAmount || 0).toLocaleString('en-IN')}
+                      </td>
+
+                      <td className="py-3 text-slate-400">{item.partyContact || '-'}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="py-8 text-center text-slate-500 text-xs">
+            <Inbox className="w-8 h-8 mx-auto text-slate-600 mb-1" />
+            <p>No pending dues or receivables found!</p>
+          </div>
+        )}
       </div>
 
       {/* ADD / EDIT LENDER LOAN MODAL (CRUD) */}

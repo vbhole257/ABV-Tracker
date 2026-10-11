@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Users, Check, Trash2, Edit, UserPlus, DollarSign, CreditCard, Calendar, Inbox, Clock, CheckSquare } from 'lucide-react';
+import { Users, Check, Trash2, Edit, UserPlus, DollarSign, CreditCard, Calendar, Inbox, Clock, CheckSquare, Loader2, Receipt, Wrench, Zap, Fuel, Coffee } from 'lucide-react';
 
 interface PayrollExpensesPageProps {
   onRefresh: () => void;
@@ -8,6 +8,7 @@ interface PayrollExpensesPageProps {
 export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefresh }) => {
   const [activeTab, setActiveTab] = useState<'STAFF' | 'ATTENDANCE' | 'ADVANCES' | 'PAYROLL' | 'EXPENSES'>('STAFF');
   const [toast, setToast] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   // Data States
   const [employees, setEmployees] = useState<any[]>([]);
@@ -15,6 +16,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
   const [payrolls, setPayrolls] = useState<any[]>([]);
   const [attendances, setAttendances] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
 
   // Staff Form State (Add / Edit)
   const [showStaffModal, setShowStaffModal] = useState(false);
@@ -56,14 +58,26 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
   const [payMode, setPayMode] = useState('CASH');
   const [payAccountId, setPayAccountId] = useState('');
 
+  // Factory Expenses / Other Kharche Modal State
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
+  const [editingExpId, setEditingExpId] = useState<string | null>(null);
+  const [expCategory, setExpCategory] = useState('ELECTRICITY');
+  const [expAmount, setExpAmount] = useState(5000);
+  const [expDate, setExpDate] = useState(new Date().toISOString().slice(0, 10));
+  const [expMode, setExpMode] = useState('CASH');
+  const [expAccountId, setExpAccountId] = useState('');
+  const [expRefNo, setExpRefNo] = useState('');
+  const [expNotes, setExpNotes] = useState('');
+
   const loadData = async () => {
     try {
-      const [empRes, advRes, payRes, attRes, accRes] = await Promise.all([
+      const [empRes, advRes, payRes, attRes, accRes, expRes] = await Promise.all([
         fetch('/api/v1/employees').then((r) => r.json()),
         fetch('/api/v1/employees/salary-advances').then((r) => r.json()),
         fetch('/api/v1/employees/payrolls').then((r) => r.json()),
         fetch('/api/v1/employees/attendance').then((r) => r.json()),
         fetch('/api/v1/accounts').then((r) => r.json()),
+        fetch('/api/v1/expenses').then((r) => r.json()),
       ]);
 
       if (empRes.success) {
@@ -77,15 +91,17 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
       if (advRes.success) setAdvances(advRes.data);
       if (payRes.success) setPayrolls(payRes.data);
       if (attRes.success) setAttendances(attRes.data);
+      if (expRes.success) setExpenses(expRes.data);
       if (accRes.success) {
         setAccounts(accRes.data);
         if (accRes.data.length > 0) {
           setAdvAccountId(accRes.data[0].id);
           setPayAccountId(accRes.data[0].id);
+          setExpAccountId(accRes.data[0].id);
         }
       }
     } catch (e) {
-      console.error('Failed loading payroll data:', e);
+      console.error('Failed loading payroll & expense data:', e);
     }
   };
 
@@ -484,9 +500,94 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
     }
   };
 
+  // FACTORY EXPENSE CRUD: Open Modal (Add / Edit)
+  const handleOpenExpenseModal = (exp?: any) => {
+    if (exp) {
+      setEditingExpId(exp.id);
+      setExpCategory(exp.category || 'ELECTRICITY');
+      setExpAmount(exp.amount || 0);
+      setExpDate(new Date(exp.expenseDate || exp.createdAt).toISOString().slice(0, 10));
+      setExpMode(exp.paymentMode || 'CASH');
+      setExpRefNo(exp.referenceNo || '');
+      setExpNotes(exp.notes || '');
+    } else {
+      setEditingExpId(null);
+      setExpCategory('ELECTRICITY');
+      setExpAmount(5000);
+      setExpDate(new Date().toISOString().slice(0, 10));
+      setExpMode('CASH');
+      setExpRefNo('');
+      setExpNotes('');
+    }
+    setShowExpenseModal(true);
+  };
+
+  // FACTORY EXPENSE CRUD: Save (Create / Update)
+  const handleSaveExpense = async () => {
+    if (expAmount <= 0) {
+      alert('Please enter a valid expense amount');
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const endpoint = editingExpId ? `/api/v1/expenses/${editingExpId}` : '/api/v1/expenses';
+      const method = editingExpId ? 'PUT' : 'POST';
+
+      const res = await fetch(endpoint, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category: expCategory,
+          amount: Number(expAmount),
+          paymentMode: expMode,
+          bankAccountId: expAccountId || undefined,
+          referenceNo: expRefNo || undefined,
+          notes: expNotes || undefined,
+          expenseDate: expDate,
+        }),
+      });
+
+      const json = await res.json();
+      if (json.success) {
+        triggerToast(`Expense for ${expCategory} (₹${expAmount.toLocaleString()}) ${editingExpId ? 'updated' : 'recorded'}!`);
+        setShowExpenseModal(false);
+        loadData();
+        onRefresh();
+      } else {
+        alert(json.message || 'Error recording expense');
+      }
+    } catch (e) {
+      alert('Error saving factory expense');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // FACTORY EXPENSE CRUD: Delete
+  const handleDeleteExpense = async (id: string, amount: number, category: string) => {
+    if (!confirm(`Are you sure you want to delete this ₹${amount} expense entry for ${category}?`)) return;
+
+    setIsLoading(true);
+    try {
+      const res = await fetch(`/api/v1/expenses/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (json.success) {
+        triggerToast('Expense record deleted & cash restored.');
+        loadData();
+        onRefresh();
+      }
+    } catch (e) {
+      alert('Error deleting expense entry');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Calculate Metrics
   const totalAdvancesOutstanding = employees.reduce((acc, curr) => acc + (curr.advanceBalance || 0), 0);
   const totalPayrollPaid = payrolls.reduce((acc, curr) => acc + (curr.netPaid || 0), 0);
+  const totalFactoryExpenses = expenses.reduce((acc, curr) => acc + (curr.amount || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -508,6 +609,13 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => handleOpenExpenseModal()}
+            className="bg-rose-500 hover:bg-rose-400 text-carbon-950 font-bold text-xs px-3.5 py-2.5 rounded-lg shadow-lg transition flex items-center space-x-1.5"
+          >
+            <Receipt className="w-4 h-4" />
+            <span>+ Log Other Kharche</span>
+          </button>
           <button
             onClick={() => handleOpenAttendanceModal()}
             className="bg-cyan-500 hover:bg-cyan-400 text-carbon-950 font-bold text-xs px-3.5 py-2.5 rounded-lg shadow-lg transition flex items-center space-x-1.5"
@@ -540,7 +648,7 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
       </div>
 
       {/* Top Industrial Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
         <div className="industrial-card border-cyan-500/30">
           <span className="text-xs font-semibold text-slate-400">REGISTERED STAFF ROSTER</span>
           <div className="text-2xl font-bold font-mono text-cyan-400 mt-1">{employees.length} Active Staff</div>
@@ -548,11 +656,11 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
         </div>
 
         <div className="industrial-card border-amber-500/30">
-          <span className="text-xs font-semibold text-slate-400">TOTAL OUTSTANDING SALARY ADVANCES</span>
+          <span className="text-xs font-semibold text-slate-400">OUTSTANDING SALARY ADVANCES</span>
           <div className="text-2xl font-bold font-mono text-amber-400 mt-1">
             ₹{totalAdvancesOutstanding.toLocaleString('en-IN')}
           </div>
-          <span className="text-[11px] text-amber-500/80 mt-1 block">To be deducted from monthly wages</span>
+          <span className="text-[11px] text-amber-500/80 mt-1 block">Deducted from monthly wages</span>
         </div>
 
         <div className="industrial-card border-emerald-500/30">
@@ -561,6 +669,14 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
             ₹{totalPayrollPaid.toLocaleString('en-IN')}
           </div>
           <span className="text-[11px] text-slate-500 mt-1 block">{payrolls.length} Payroll Settlements logged</span>
+        </div>
+
+        <div className="industrial-card border-rose-500/30">
+          <span className="text-xs font-semibold text-slate-400">OTHER KHARCHE / EXPENSES</span>
+          <div className="text-2xl font-bold font-mono text-rose-400 mt-1">
+            ₹{totalFactoryExpenses.toLocaleString('en-IN')}
+          </div>
+          <span className="text-[11px] text-slate-500 mt-1 block">{expenses.length} Expense entries logged</span>
         </div>
       </div>
 
@@ -612,6 +728,18 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
         >
           <CreditCard className="w-4 h-4" />
           <span>Payroll Settlements ({payrolls.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('EXPENSES')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-t-lg transition flex items-center space-x-2 whitespace-nowrap ${
+            activeTab === 'EXPENSES'
+              ? 'bg-carbon-800 text-rose-400 border-t-2 border-rose-400'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Receipt className="w-4 h-4" />
+          <span>Factory Kharche & Expenses ({expenses.length})</span>
         </button>
       </div>
 
@@ -922,6 +1050,81 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
             <div className="py-10 text-center text-slate-500 text-xs space-y-2">
               <Inbox className="w-8 h-8 mx-auto text-slate-600" />
               <p>No payroll settlements logged yet. Click "+ Settle Monthly Salary".</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB 5: FACTORY EXPENSES & OTHER KHARCHE (CRUD) */}
+      {activeTab === 'EXPENSES' && (
+        <div className="industrial-card">
+          <div className="flex items-center justify-between border-b border-carbon-700/60 pb-3">
+            <h2 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+              <Receipt className="w-4 h-4 text-rose-400" />
+              <span>Factory Expenses & Other Kharche Log (CRUD)</span>
+            </h2>
+            <button
+              onClick={() => handleOpenExpenseModal()}
+              className="text-xs font-bold text-rose-400 hover:underline"
+            >
+              + Log New Factory Kharche
+            </button>
+          </div>
+
+          {expenses.length > 0 ? (
+            <div className="overflow-x-auto mt-4">
+              <table className="w-full text-left text-xs font-mono">
+                <thead>
+                  <tr className="text-slate-400 border-b border-carbon-800">
+                    <th className="pb-3">EXPENSE DATE</th>
+                    <th className="pb-3">CATEGORY</th>
+                    <th className="pb-3">AMOUNT (₹)</th>
+                    <th className="pb-3">PAYMENT MODE</th>
+                    <th className="pb-3">NOTES / BILL NO</th>
+                    <th className="pb-3 text-right">ACTION</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-carbon-800/60 text-slate-200">
+                  {expenses.map((exp) => (
+                    <tr key={exp.id} className="hover:bg-carbon-800/40">
+                      <td className="py-3 text-slate-300">
+                        {new Date(exp.expenseDate || exp.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="py-3">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+                          {exp.category}
+                        </span>
+                      </td>
+                      <td className="py-3 font-bold text-rose-400 text-sm">
+                        ₹{(exp.amount || 0).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-3 text-slate-300 font-bold">{exp.paymentMode}</td>
+                      <td className="py-3 text-slate-400">{exp.notes || exp.referenceNo || '-'}</td>
+                      <td className="py-3 text-right space-x-1">
+                        <button
+                          onClick={() => handleOpenExpenseModal(exp)}
+                          className="p-1.5 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30"
+                          title="Edit Expense"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteExpense(exp.id, exp.amount, exp.category)}
+                          className="p-1.5 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
+                          title="Delete Expense"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-10 text-center text-slate-500 text-xs space-y-2">
+              <Inbox className="w-8 h-8 mx-auto text-slate-600" />
+              <p>No factory expenses or kharche logged yet. Click "+ Log New Factory Kharche".</p>
             </div>
           )}
         </div>
@@ -1385,9 +1588,118 @@ export const PayrollExpensesPage: React.FC<PayrollExpensesPageProps> = ({ onRefr
               </button>
               <button
                 onClick={handleProcessPayroll}
-                className="px-5 py-2 rounded bg-emerald-500 hover:bg-emerald-400 text-carbon-950 text-xs font-bold shadow-lg"
+                disabled={isLoading}
+                className="px-5 py-2 rounded bg-emerald-500 hover:bg-emerald-400 text-carbon-950 text-xs font-bold shadow-lg flex items-center space-x-1.5"
               >
-                Confirm Payroll Settlement
+                {isLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>Confirm Payroll Settlement</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: LOG / EDIT FACTORY EXPENSE */}
+      {showExpenseModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="industrial-card border-rose-500/40 w-full max-w-lg space-y-4">
+            <h2 className="text-sm font-bold text-rose-400 border-b border-carbon-700/60 pb-2 flex items-center space-x-2">
+              <Receipt className="w-4 h-4" />
+              <span>{editingExpId ? 'Edit Factory Expense Entry' : 'Log New Factory Kharche / Expense'}</span>
+            </h2>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 mb-1 font-semibold">Expense Category *</label>
+                  <select
+                    value={expCategory}
+                    onChange={(e) => setExpCategory(e.target.value)}
+                    className="w-full industrial-input font-bold text-rose-400"
+                  >
+                    <option value="ELECTRICITY">⚡ Electricity / Power Bill</option>
+                    <option value="DIESEL">⛽ Diesel / Generator Fuel</option>
+                    <option value="FREIGHT">🚚 Transport & Freight Kharche</option>
+                    <option value="MAINTENANCE">🔧 Factory Machine Maintenance</option>
+                    <option value="SUPPLIES">📦 Factory Consumables & Supplies</option>
+                    <option value="TEA_SNACKS">☕ Worker Tea & Refreshment Kharche</option>
+                    <option value="MISC_KHARCHE">📋 Miscellaneous Daily Kharche</option>
+                    <option value="OTHER">Other Expense</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 mb-1 font-semibold">Expense Amount (₹) *</label>
+                  <input
+                    type="number"
+                    value={expAmount}
+                    onChange={(e) => setExpAmount(Number(e.target.value))}
+                    className="w-full industrial-input font-mono font-bold text-rose-400 text-base"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 mb-1 font-semibold">Expense Date *</label>
+                  <input
+                    type="date"
+                    value={expDate}
+                    onChange={(e) => setExpDate(e.target.value)}
+                    className="w-full industrial-input font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 mb-1 font-semibold">Payment Mode</label>
+                  <select
+                    value={expMode}
+                    onChange={(e) => setExpMode(e.target.value)}
+                    className="w-full industrial-input"
+                  >
+                    <option value="CASH">Cash Counter Box</option>
+                    <option value="BANK">Bank Account / UPI</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">Bill / Receipt / Reference No</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Bill #8841 / MSEB-1092"
+                  value={expRefNo}
+                  onChange={(e) => setExpRefNo(e.target.value)}
+                  className="w-full industrial-input"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 mb-1 font-semibold">Expense Details / Notes</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Monthly electricity bill for plant / Generator oil change"
+                  value={expNotes}
+                  onChange={(e) => setExpNotes(e.target.value)}
+                  className="w-full industrial-input"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-3 border-t border-carbon-800">
+              <button
+                onClick={() => setShowExpenseModal(false)}
+                className="px-4 py-2 rounded bg-carbon-800 text-slate-300 text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveExpense}
+                disabled={isLoading}
+                className="px-5 py-2 rounded bg-rose-500 hover:bg-rose-400 text-carbon-950 text-xs font-bold shadow-lg flex items-center space-x-1.5"
+              >
+                {isLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{editingExpId ? 'Save Expense Changes' : 'Record Expense Entry'}</span>
               </button>
             </div>
           </div>

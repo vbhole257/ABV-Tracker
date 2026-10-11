@@ -62,15 +62,35 @@ async function initServer() {
     };
   });
 
+// HELPER: Auto-routing to Factory Cash Box (CASH) or Online Bank Account (BANK/UPI/ONLINE)
+async function getAccountForMode(tx: any, paymentMode: string) {
+  const isCash = paymentMode?.toUpperCase() === 'CASH';
+  const targetType = isCash ? 'CASH' : 'BANK';
+  let account = await tx.account.findFirst({ where: { accountType: targetType } });
+  if (!account) {
+    account = await tx.account.create({
+      data: {
+        id: isCash ? 'acc-cash-01' : 'acc-bank-01',
+        accountName: isCash ? 'Factory Cash Box' : 'Online Bank Account',
+        accountType: targetType,
+        balance: 0.0,
+      },
+    });
+  } else if (!isCash && account.accountName !== 'Online Bank Account') {
+    account = await tx.account.update({
+      where: { id: account.id },
+      data: { accountName: 'Online Bank Account' },
+    });
+  }
+  return account;
+}
+
   // 2. DASHBOARD EXECUTIVE SUMMARY API
   server.get('/api/v1/dashboard/summary', async () => {
-    const accounts = await prisma.account.findMany();
-    let totalCash = 0;
-    let totalBank = 0;
-    accounts.forEach((acc) => {
-      if (acc.accountType === 'CASH') totalCash += acc.balance;
-      else totalBank += acc.balance;
-    });
+    const cashAcc = await prisma.account.findFirst({ where: { accountType: 'CASH' } });
+    const bankAcc = await prisma.account.findFirst({ where: { accountType: 'BANK' } });
+    const totalCash = cashAcc ? cashAcc.balance : 0;
+    const totalBank = bankAcc ? bankAcc.balance : 0;
 
     const wholesalers = await prisma.wholesaler.findMany();
     const customerReceivables = wholesalers.reduce((sum, w) => sum + w.currentOutstanding, 0);
@@ -103,13 +123,91 @@ async function initServer() {
       where: { periodIdentifier: '2026-09' },
     });
 
+    // Overall & Monthly Turnover Stats
+    const allSalesOrders = await prisma.salesOrder.findMany({
+      include: { items: true },
+      orderBy: { dispatchDate: 'desc' },
+    });
+
+    const allExpenses = await prisma.factoryExpense.findMany({
+      orderBy: { expenseDate: 'desc' },
+    });
+
+    const allPurchases = await prisma.purchase.findMany({
+      orderBy: { purchaseDate: 'desc' },
+    });
+
+    // Today's summary calculations
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const todaySales = await prisma.salesOrder.findMany({
-      where: { createdAt: { gte: today } },
-    });
-    const todayCasesSold = todaySales.reduce((sum, o) => sum + (o.cratesIssued || 0), 0);
+    const todaySales = allSalesOrders.filter((o) => new Date(o.createdAt) >= today);
+    const todayCasesSold = todaySales.reduce((sum, o) => {
+      const orderCases = o.items.reduce((iSum, item) => iSum + item.casesQuantity, 0);
+      return sum + (orderCases || o.cratesIssued || 0);
+    }, 0);
     const todayRevenue = todaySales.reduce((sum, o) => sum + o.totalAmount, 0);
+
+    let totalLifetimeCases = 0;
+    let totalLifetimeTurnover = 0;
+    let totalPaidCash = 0;
+    let totalPaidBank = 0;
+
+    allSalesOrders.forEach((o) => {
+      const orderCases = o.items.reduce((sum, item) => sum + item.casesQuantity, 0);
+      totalLifetimeCases += orderCases || o.cratesIssued || 0;
+      totalLifetimeTurnover += o.totalAmount;
+
+      const isCash = ((o as any).paymentMode || 'CASH').toUpperCase() === 'CASH';
+      if (isCash) totalPaidCash += o.paidAmount;
+      else totalPaidBank += o.paidAmount;
+    });
+
+    const monthlyMap: { [key: string]: any } = {};
+
+    allSalesOrders.forEach((o) => {
+      const d = new Date(o.dispatchDate || o.createdAt);
+      const mKey = d.toISOString().slice(0, 7);
+      const mName = d.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+      if (!monthlyMap[mKey]) {
+        monthlyMap[mKey] = {
+          monthKey: mKey,
+          monthName: mName,
+          casesSold: 0,
+          turnoverRevenue: 0,
+          cashCollected: 0,
+          onlineCollected: 0,
+          purchasesTotal: 0,
+          expensesTotal: 0,
+        };
+      }
+
+      const orderCases = o.items.reduce((sum, item) => sum + item.casesQuantity, 0);
+      monthlyMap[mKey].casesSold += orderCases || o.cratesIssued || 0;
+      monthlyMap[mKey].turnoverRevenue += o.totalAmount;
+
+      const isCash = ((o as any).paymentMode || 'CASH').toUpperCase() === 'CASH';
+      if (isCash) monthlyMap[mKey].cashCollected += o.paidAmount;
+      else monthlyMap[mKey].onlineCollected += o.paidAmount;
+    });
+
+    allPurchases.forEach((p) => {
+      const d = new Date(p.purchaseDate || p.createdAt);
+      const mKey = d.toISOString().slice(0, 7);
+      if (monthlyMap[mKey]) {
+        monthlyMap[mKey].purchasesTotal += p.totalAmount;
+      }
+    });
+
+    allExpenses.forEach((e) => {
+      const d = new Date(e.expenseDate || e.createdAt);
+      const mKey = d.toISOString().slice(0, 7);
+      if (monthlyMap[mKey]) {
+        monthlyMap[mKey].expensesTotal += e.amount;
+      }
+    });
+
+    const monthlyBreakdown = Object.values(monthlyMap).sort((a: any, b: any) => b.monthKey.localeCompare(a.monthKey));
 
     return {
       success: true,
@@ -123,6 +221,13 @@ async function initServer() {
           totalLoanOutstanding,
           emiDue30Days,
         },
+        businessTurnover: {
+          totalCasesSold: totalLifetimeCases,
+          totalTurnoverRevenue: totalLifetimeTurnover,
+          totalPaidCash,
+          totalPaidBank,
+        },
+        monthlyBreakdown,
         todaySummary: {
           casesSold: todayCasesSold,
           revenue: todayRevenue,
@@ -186,10 +291,47 @@ async function initServer() {
   });
 
   server.get('/api/v1/accounts', async () => {
-    const accounts = await prisma.account.findMany({
-      orderBy: { createdAt: 'asc' },
+    let cashAccount = await prisma.account.findFirst({ where: { accountType: 'CASH' } });
+    if (!cashAccount) {
+      cashAccount = await prisma.account.create({
+        data: { id: 'acc-cash-01', accountName: 'Factory Cash Box', accountType: 'CASH', balance: 0.0 },
+      });
+    }
+
+    let bankAccount = await prisma.account.findFirst({ where: { accountType: 'BANK' } });
+    if (!bankAccount) {
+      bankAccount = await prisma.account.create({
+        data: { id: 'acc-bank-01', accountName: 'Online Bank Account', accountType: 'BANK', balance: 0.0 },
+      });
+    } else if (bankAccount.accountName !== 'Online Bank Account') {
+      bankAccount = await prisma.account.update({
+        where: { id: bankAccount.id },
+        data: { accountName: 'Online Bank Account' },
+      });
+    }
+
+    // Merge any extra non-cash accounts (like legacy acc-upi-01) into Online Bank Account
+    const otherAccounts = await prisma.account.findMany({
+      where: {
+        id: { notIn: [cashAccount.id, bankAccount.id] },
+        accountType: { not: 'CASH' },
+      },
     });
-    return { success: true, data: accounts };
+
+    if (otherAccounts.length > 0) {
+      const extraBalance = otherAccounts.reduce((sum, a) => sum + a.balance, 0);
+      if (extraBalance !== 0) {
+        bankAccount = await prisma.account.update({
+          where: { id: bankAccount.id },
+          data: { balance: { increment: extraBalance } },
+        });
+      }
+      await prisma.account.deleteMany({
+        where: { id: { in: otherAccounts.map((a) => a.id) } },
+      });
+    }
+
+    return { success: true, data: [cashAccount, bankAccount] };
   });
 
   server.post('/api/v1/products', async (request) => {
@@ -346,11 +488,21 @@ async function initServer() {
         }
 
         if (body.paidAmount > 0) {
-          const account = await tx.account.findFirst();
+          const account = await getAccountForMode(tx, body.paymentMode);
           if (account) {
             await tx.account.update({
               where: { id: account.id },
               data: { balance: { decrement: body.paidAmount } },
+            });
+            await tx.accountTransaction.create({
+              data: {
+                accountId: account.id,
+                transactionType: 'OUTFLOW',
+                amount: body.paidAmount,
+                category: 'RAW_MATERIAL_PURCHASE',
+                referenceId: createdPurchase.id,
+                notes: `Paid via ${body.paymentMode} for Raw Material Purchase #${body.invoiceNumber}`,
+              },
             });
           }
         }
@@ -673,11 +825,21 @@ async function initServer() {
         }
 
         if (body.paidAmount > 0) {
-          const account = await tx.account.findFirst();
+          const account = await getAccountForMode(tx, body.paymentMode);
           if (account) {
             await tx.account.update({
               where: { id: account.id },
               data: { balance: { increment: body.paidAmount } },
+            });
+            await tx.accountTransaction.create({
+              data: {
+                accountId: account.id,
+                transactionType: 'INFLOW',
+                amount: body.paidAmount,
+                category: 'SALES_ORDER_PAYMENT',
+                referenceId: createdOrder.id,
+                notes: `Received via ${body.paymentMode} for Sales Invoice #${body.invoiceNumber}`,
+              },
             });
           }
         }
@@ -740,12 +902,12 @@ async function initServer() {
           });
         }
 
-        // Revert previous paidAmount on cash account if applicable
+        // Revert previous paidAmount on old account
         if (existing.paidAmount > 0) {
-          const account = await tx.account.findFirst();
-          if (account) {
+          const oldAcc = await getAccountForMode(tx, (existing as any).paymentMode || 'CASH');
+          if (oldAcc) {
             await tx.account.update({
-              where: { id: account.id },
+              where: { id: oldAcc.id },
               data: { balance: { decrement: existing.paidAmount } },
             });
           }
@@ -792,12 +954,12 @@ async function initServer() {
           });
         }
 
-        // Apply new paidAmount on cash account
+        // Apply new paidAmount on new account
         if (body.paidAmount > 0) {
-          const account = await tx.account.findFirst();
-          if (account) {
+          const newAcc = await getAccountForMode(tx, body.paymentMode || 'CASH');
+          if (newAcc) {
             await tx.account.update({
-              where: { id: account.id },
+              where: { id: newAcc.id },
               data: { balance: { increment: body.paidAmount } },
             });
           }
@@ -972,6 +1134,227 @@ async function initServer() {
     });
 
     return { success: true, message: 'EMI Paid successfully. Principal updated & interest logged.' };
+  });
+
+  // 7B. FACTORY EXPENSES & OTHER KHARCHE CRUD APIs
+  server.get('/api/v1/expenses', async () => {
+    const expenses = await prisma.factoryExpense.findMany({
+      orderBy: { expenseDate: 'desc' },
+    });
+    return { success: true, data: expenses };
+  });
+
+  server.post('/api/v1/expenses', async (request) => {
+    const schema = z.object({
+      category: z.string(), // ELECTRICITY, DIESEL, FREIGHT, MAINTENANCE, SUPPLIES, TEA_SNACKS, MISC_KHARCHE, OTHER
+      amount: z.number().positive(),
+      paymentMode: z.string().default('CASH'),
+      bankAccountId: z.string().optional(),
+      referenceNo: z.string().optional(),
+      notes: z.string().optional(),
+      expenseDate: z.string().optional(),
+    });
+    const body = schema.parse(request.body);
+
+    const expense = await prisma.$transaction(async (tx) => {
+      const exp = await tx.factoryExpense.create({
+        data: {
+          category: body.category,
+          amount: body.amount,
+          paymentMode: body.paymentMode,
+          bankAccountId: body.bankAccountId,
+          referenceNo: body.referenceNo,
+          notes: body.notes,
+          expenseDate: body.expenseDate ? new Date(body.expenseDate) : new Date(),
+        },
+      });
+
+      // Debit account
+      const acc = await getAccountForMode(tx, body.paymentMode);
+      if (acc) {
+        await tx.account.update({
+          where: { id: acc.id },
+          data: { balance: { decrement: body.amount } },
+        });
+
+        await tx.accountTransaction.create({
+          data: {
+            accountId: acc.id,
+            transactionType: 'OUTFLOW',
+            amount: body.amount,
+            category: `EXPENSE_${body.category}`,
+            referenceId: exp.id,
+            notes: `Expense for ${body.category}: ${body.notes || 'Factory Kharche'}`,
+          },
+        });
+      }
+
+      return exp;
+    });
+
+    return { success: true, data: expense, message: 'Factory Expense recorded successfully.' };
+  });
+
+  server.put('/api/v1/expenses/:id', async (request) => {
+    const { id } = request.params as { id: string };
+    const schema = z.object({
+      category: z.string().optional(),
+      amount: z.number().optional(),
+      paymentMode: z.string().optional(),
+      referenceNo: z.string().optional(),
+      notes: z.string().optional(),
+      expenseDate: z.string().optional(),
+    });
+    const body = schema.parse(request.body);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const existing = await tx.factoryExpense.findUnique({ where: { id } });
+      if (!existing) throw new Error('Expense record not found');
+
+      if (body.amount !== undefined && body.amount !== existing.amount) {
+        const diff = body.amount - existing.amount;
+        const acc = await tx.account.findFirst({
+          where: { accountType: existing.paymentMode === 'CASH' ? 'CASH' : 'BANK' },
+        });
+        if (acc) {
+          await tx.account.update({
+            where: { id: acc.id },
+            data: { balance: { decrement: diff } },
+          });
+        }
+      }
+
+      return await tx.factoryExpense.update({
+        where: { id },
+        data: {
+          category: body.category ?? existing.category,
+          amount: body.amount ?? existing.amount,
+          paymentMode: body.paymentMode ?? existing.paymentMode,
+          referenceNo: body.referenceNo !== undefined ? body.referenceNo : existing.referenceNo,
+          notes: body.notes !== undefined ? body.notes : existing.notes,
+          expenseDate: body.expenseDate ? new Date(body.expenseDate) : existing.expenseDate,
+        },
+      });
+    });
+
+    return { success: true, data: updated, message: 'Expense record updated.' };
+  });
+
+  server.delete('/api/v1/expenses/:id', async (request) => {
+    const { id } = request.params as { id: string };
+
+    await prisma.$transaction(async (tx) => {
+      const existing = await tx.factoryExpense.findUnique({ where: { id } });
+      if (existing) {
+        const acc = await tx.account.findFirst({
+          where: { accountType: existing.paymentMode === 'CASH' ? 'CASH' : 'BANK' },
+        });
+        if (acc) {
+          await tx.account.update({
+            where: { id: acc.id },
+            data: { balance: { increment: existing.amount } },
+          });
+        }
+        await tx.factoryExpense.delete({ where: { id } });
+      }
+    });
+
+    return { success: true, message: 'Expense record deleted & cash restored.' };
+  });
+
+  // 7C. MASTER PENDING DUES & RECEIVABLES API (SORTABLE BY DATE)
+  server.get('/api/v1/finance/pending-dues', async () => {
+    // 1. Pending Sales Orders (Receivables from Wholesalers)
+    const sales = await prisma.salesOrder.findMany({
+      where: {
+        paymentStatus: { in: ['UNPAID', 'PARTIAL'] },
+      },
+      include: { wholesaler: true },
+      orderBy: { dispatchDate: 'desc' },
+    });
+
+    // 2. Pending Purchases (Payables to Suppliers)
+    const purchases = await prisma.purchase.findMany({
+      include: { supplier: true },
+      orderBy: { purchaseDate: 'desc' },
+    });
+
+    const pendingPurchases = purchases.filter((p) => p.totalAmount > p.paidAmount);
+
+    // 3. Upcoming / Overdue EMIs
+    const emis = await prisma.eMISchedule.findMany({
+      where: { status: 'UPCOMING' },
+      include: { lender: true },
+      orderBy: { dueDate: 'asc' },
+    });
+
+    const items: any[] = [];
+
+    sales.forEach((s) => {
+      const unpaid = s.totalAmount - s.paidAmount;
+      items.push({
+        id: `sale-${s.id}`,
+        type: 'RECEIVABLE',
+        category: 'Wholesale Sales Order',
+        title: s.wholesaler.businessName,
+        referenceNo: s.invoiceNumber,
+        date: s.dispatchDate,
+        totalAmount: s.totalAmount,
+        paidAmount: s.paidAmount,
+        pendingAmount: unpaid,
+        status: s.paymentStatus,
+        partyContact: s.wholesaler.mobile,
+      });
+    });
+
+    pendingPurchases.forEach((p) => {
+      const unpaid = p.totalAmount - p.paidAmount;
+      items.push({
+        id: `pur-${p.id}`,
+        type: 'PAYABLE',
+        category: 'Supplier Raw Material Purchase',
+        title: p.supplier.name,
+        referenceNo: p.invoiceNumber,
+        date: p.purchaseDate,
+        totalAmount: p.totalAmount,
+        paidAmount: p.paidAmount,
+        pendingAmount: unpaid,
+        status: p.paidAmount > 0 ? 'PARTIAL' : 'UNPAID',
+        partyContact: p.supplier.phone,
+      });
+    });
+
+    emis.forEach((e) => {
+      items.push({
+        id: `emi-${e.id}`,
+        type: 'EMI_DUE',
+        category: 'Lender Loan EMI',
+        title: e.lender.lenderName,
+        referenceNo: `EMI #${e.installmentNo}`,
+        date: e.dueDate,
+        totalAmount: e.emiAmount,
+        paidAmount: 0,
+        pendingAmount: e.emiAmount,
+        status: 'UPCOMING',
+        partyContact: e.lender.accountNumber,
+      });
+    });
+
+    // Default sort by date descending
+    items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return {
+      success: true,
+      data: {
+        summary: {
+          totalPendingReceivables: sales.reduce((sum, s) => sum + (s.totalAmount - s.paidAmount), 0),
+          totalPendingPayables: pendingPurchases.reduce((sum, p) => sum + (p.totalAmount - p.paidAmount), 0),
+          totalUpcomingEmis: emis.reduce((sum, e) => sum + e.emiAmount, 0),
+          totalItemsCount: items.length,
+        },
+        items,
+      },
+    };
   });
 
   // 8. EMPLOYEES CRUD APIs
@@ -1149,22 +1532,25 @@ async function initServer() {
         });
       }
 
-      if (body.accountId && netPaid > 0) {
-        await tx.account.update({
-          where: { id: body.accountId },
-          data: { balance: { decrement: netPaid } },
-        });
+      if (netPaid > 0) {
+        const acc = await getAccountForMode(tx, body.paymentMode);
+        if (acc) {
+          await tx.account.update({
+            where: { id: acc.id },
+            data: { balance: { decrement: netPaid } },
+          });
 
-        await tx.accountTransaction.create({
-          data: {
-            accountId: body.accountId,
-            transactionType: 'OUTFLOW',
-            amount: netPaid,
-            category: 'PAYROLL_SETTLEMENT',
-            referenceId: record.id,
-            notes: `Payroll paid for ${body.periodMonth}/${body.periodYear}`,
-          },
-        });
+          await tx.accountTransaction.create({
+            data: {
+              accountId: acc.id,
+              transactionType: 'OUTFLOW',
+              amount: netPaid,
+              category: 'PAYROLL_SETTLEMENT',
+              referenceId: record.id,
+              notes: `Payroll paid via ${body.paymentMode} for ${body.periodMonth}/${body.periodYear}`,
+            },
+          });
+        }
       }
 
       return record;
